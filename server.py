@@ -103,6 +103,15 @@ def handle_client_request(server, data, client_address):
 
             server.active_players[client_address] = new_player
             server.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
+
+            # Increment their login count
+            server.players[player_id]["logins"] += 1
+            try:
+                with open(server.server_db_path, 'w') as f:
+                    json.dump(server.players, f, indent=4)  # Save updated DB
+            except Exception as e:
+                print(f"Error updating server database: {e}")
+
         else:
             # User not found or wrong password
             print(f"Server - Failed login attempt for {username} from {client_address}")
@@ -135,6 +144,7 @@ def handle_client_request(server, data, client_address):
     elif command == "LOGINS":
         player_id = server.check_db(username, password)
         if player_id:
+            print(f"Server - Received login count request from {username} (ID: {player_id})")
             num_logins = server.get_num_of_logins(player_id)
             server.send_data(f"LOGINS_COUNT {num_logins}", client_address)
         else:

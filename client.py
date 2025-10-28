@@ -60,8 +60,24 @@ def handle_login_response(response):
         print(f"Unknown or empty server response: {response}")
         return False
 
+def handle_login_counter(response):
+    """
+    Parses the server's login counter response.
+    Returns the number of logins if successful, -1 otherwise.
+    """
+    if response and response.startswith("LOGINS_COUNT"):
+        try:
+            count = int(response.split()[1])
+            print(f"Client - Number of previous logins: {count}")
+            return count
+        except (IndexError, ValueError):
+            print("Error parsing login count from server response.")
+            return -1
+    else:
+        print(f"Unknown or empty server response: {response}")
+        return -1
 
-def run_login_screen(screen, client, login_ui):
+def run_login_screen(screen, client, login_ui, ret_info):
     """
     Shows the login UI and handles login/signup logic.
     Returns True if login is successful, False if the user quits.
@@ -96,6 +112,8 @@ def run_login_screen(screen, client, login_ui):
 
                 # Check if the response means we are logged in
                 if handle_login_response(response):
+                    ret_info.append(username)
+                    ret_info.append(password)
                     return True  # Login was successful!
 
         # Draw the login UI
@@ -153,6 +171,8 @@ def run_game_loop(screen, client):
 
     print("Game loop ended.")
 
+#TODO: Add a response timeout for server communications
+#TODO: Ensure network connection before increasing login count
 
 def main():
     """Main function to initialize and run the client."""
@@ -164,12 +184,28 @@ def main():
     try:
         # Step 1: Run the login screen. This loop will run
         # until the user logs in or quits.
-        login_successful = run_login_screen(screen, client, login_ui)
+        result = []
+        login_successful = run_login_screen(screen, client, login_ui, result)
 
         # Step 2: If login was successful, run the game
         if login_successful:
             print("Moving to game loop...")
-            client.send_data(f"LOGINS {client.player.profile.username} {client.player.profile.password}")
+            print(f"LOGINS {result[0]} {result[1]}")
+            client.send_data(f"LOGINS {result[0]} {result[1]}")
+
+            while True:
+                response = client.receive_data()
+                login_count = handle_login_counter(response)
+                if response is not None and login_count <= 1:
+                    stats_ui = player_ui.StatSelectUI()
+                    stats_result = run_stats_selector(screen, client, stats_ui)
+                    if stats_result is None:
+                        print("User quit during stats selection.")
+                        return
+                    sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
+                    client.send_data(f"INIT_STATS {sword_damage} {shield_defense} {slaying_strength} {healing_strength}")
+                    break
+
             run_game_loop(screen, client)
 
     except KeyboardInterrupt:
