@@ -88,49 +88,83 @@ class StatSelectUI:
 
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((400, 400))
+
+        width, height = pygame.display.get_surface().get_size()
+
+        self.screen = pygame.display.set_mode((width, height))
         pygame.display.set_caption("Login UI")
         self.clock = pygame.time.Clock()
-        self.UI_manager = pygame_gui.UIManager((400, 400))
+        self.UI_manager = pygame_gui.UIManager((width, height))
+
+        """
+                --- Label ---         20%
+        --- Sword Strength Slider --- 80%
+                --- Label ---         20%
+        --- Shield Defense Slider --- 80%
+                --- Label ---         20%
+        --- Slaying Potion Strength Slider --- 80%
+                --- Label ---         20%
+        --- Healing Potion Strength Slider --- 80%
+                --- Confirm Button --- 100%
+        """
+
+        self.sword_strength_label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((50, 50), (200, 30)),
+            text="Sword Damage:",
+            manager=self.UI_manager
+        )
 
         self.sword_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 50), (300, 30)),
-            start_value=2,
+            relative_rect=pygame.Rect((50, 80), (300, 30)),
+            start_value=10,
             value_range=(0, 3),
-            manager=self.UI_manager,
-            object_id='sword_strength'
+            manager=self.UI_manager
+        )
+
+        self.shield_defense_label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((50, 130), (200, 30)),
+            text="Shield Defense:",
+            manager=self.UI_manager
         )
 
         self.shield_defense = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 100), (300, 30)),
-            start_value=2,
+            relative_rect=pygame.Rect((50, 160), (300, 30)),
+            start_value=10,
             value_range=(0, 3),
-            manager=self.UI_manager,
-            object_id='shield_defense'
+            manager=self.UI_manager
+        )
+
+        self.slaying_strength_label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((50, 210), (200, 30)),
+            text="Slaying Potion Strength:",
+            manager=self.UI_manager
         )
 
         self.slaying_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 150), (300, 30)),
-            start_value=2,
+            relative_rect=pygame.Rect((50, 240), (300, 30)),
+            start_value=10,
             value_range=(0, 3),
-            manager=self.UI_manager,
-            object_id='slaying_strength'
+            manager=self.UI_manager
+        )
+
+        self.healing_strength_label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((50, 290), (200, 30)),
+            text="Healing Potion Strength:",
+            manager=self.UI_manager
         )
 
         self.healing_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 200), (300, 30)),
-            start_value=2,
+            relative_rect=pygame.Rect((50, 320), (300, 30)),
+            start_value=10,
             value_range=(0, 3),
-            manager=self.UI_manager,
-            object_id='healing_strength'
+            manager=self.UI_manager
+        )
+        self.confirm_button = pygame_gui.elements.UIButton(
+            relative_rect=pygame.Rect((150, 370), (100, 40)),
+            text="Confirm",
+            manager=self.UI_manager
         )
 
-        self.confirm_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect((150, 300), (100, 40)),
-            text="Confirm",
-            manager=self.UI_manager,
-            object_id='confirm_button'
-        )
         
     def draw(self):
         time_delta = self.clock.tick(60) / 1000.0
