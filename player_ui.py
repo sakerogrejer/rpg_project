@@ -108,59 +108,40 @@ class StatSelectUI:
                 --- Confirm Button --- 100%
         """
 
-        self.sword_strength_label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((50, 50), (200, 30)),
-            text="Sword Damage:",
-            manager=self.UI_manager
+        self.sword_strength = LabeledSlider(
+            manager=self.UI_manager,
+            label_text="Sword Damage:",
+            rect=pygame.Rect((50, 25), (300, 70)),
+            start_value=0,
+            value_range=(0, 3)
         )
 
-        self.sword_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 80), (300, 30)),
-            start_value=10,
-            value_range=(0, 3),
-            manager=self.UI_manager
+        self.shield_defense = LabeledSlider(
+            manager=self.UI_manager,
+            label_text="Shield Defense:",
+            rect=pygame.Rect((50, 95), (300, 70)),
+            start_value=0,
+            value_range=(0, 3)
         )
 
-        self.shield_defense_label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((50, 130), (200, 30)),
-            text="Shield Defense:",
-            manager=self.UI_manager
+        self.slaying_strength = LabeledSlider(
+            manager=self.UI_manager,
+            label_text="Slaying Potion Strength:",
+            rect=pygame.Rect((50, 165), (300, 70)),
+            start_value=0,
+            value_range=(0, 3)
         )
 
-        self.shield_defense = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 160), (300, 30)),
-            start_value=10,
-            value_range=(0, 3),
-            manager=self.UI_manager
+        self.healing_strength = LabeledSlider(
+            manager=self.UI_manager,
+            label_text="Healing Potion Strength:",
+            rect=pygame.Rect((50, 235), (300, 70)),
+            start_value=0,
+            value_range=(0, 3)
         )
 
-        self.slaying_strength_label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((50, 210), (200, 30)),
-            text="Slaying Potion Strength:",
-            manager=self.UI_manager
-        )
-
-        self.slaying_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 240), (300, 30)),
-            start_value=10,
-            value_range=(0, 3),
-            manager=self.UI_manager
-        )
-
-        self.healing_strength_label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((50, 290), (200, 30)),
-            text="Healing Potion Strength:",
-            manager=self.UI_manager
-        )
-
-        self.healing_strength = pygame_gui.elements.UIHorizontalSlider(
-            relative_rect=pygame.Rect((50, 320), (300, 30)),
-            start_value=10,
-            value_range=(0, 3),
-            manager=self.UI_manager
-        )
         self.confirm_button = pygame_gui.elements.UIButton(
-            relative_rect=pygame.Rect((150, 370), (100, 40)),
+            relative_rect=pygame.Rect((150, 335), (100, 40)),
             text="Confirm",
             manager=self.UI_manager
         )
@@ -179,6 +160,10 @@ class StatSelectUI:
 
         self.screen.fill((0, 0, 0))
         self.UI_manager.draw_ui(self.screen)
+        self.sword_strength.update_value_label()
+        self.shield_defense.update_value_label()
+        self.slaying_strength.update_value_label()
+        self.healing_strength.update_value_label()
 
         pygame.display.update()
 
@@ -193,3 +178,40 @@ class StatSelectUI:
                 return sword_damage, shield_defense, slaying_strength, healing_strength
 
         return None
+
+# horizontal slider element with label and value display
+class LabeledSlider:
+    def __init__(self, manager, label_text, rect, start_value, value_range):
+
+        self.label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((rect.x, rect.y), (rect.width, 30)),
+            text=label_text,
+            manager=manager
+        )
+
+        self.slider = pygame_gui.elements.UIHorizontalSlider(
+            relative_rect=pygame.Rect((rect.x, rect.y + 40), (rect.width, 30)),
+            start_value=start_value,
+            value_range=value_range,
+            manager=manager
+        )
+
+        labelRight = self.label.relative_rect.width
+        # value label next to the label
+        self.value_label = pygame_gui.elements.UILabel(
+            relative_rect=pygame.Rect((rect.x, rect.y), (rect.width + (labelRight // 2), 30)),
+            text=str(start_value),
+            manager=manager
+        )
+
+
+    def update_value_label(self):
+        current_value = int(self.slider.get_current_value())
+        self.value_label.set_text(str(current_value))
+
+    def get_value(self):
+        return int(self.slider.get_current_value())
+
+    def get_current_value(self):
+        return self.slider.get_current_value()
+

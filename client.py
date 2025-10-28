@@ -137,8 +137,8 @@ def run_stats_selector(screen, client, stats_ui):
 
             if stats_result is not None:
                 sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                print(f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, ")
-                print(f"Slaying Potion {slaying_strength}, Healing Potion {healing_strength}")
+                print(f"Client - Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
+                return sword_damage, shield_defense, slaying_strength, healing_strength
 
         stats_ui.draw()
 
@@ -203,7 +203,15 @@ def main():
                         print("User quit during stats selection.")
                         return
                     sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                    client.send_data(f"INIT_STATS {sword_damage} {shield_defense} {slaying_strength} {healing_strength}")
+                    client.send_data(f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}"+
+                                     f" {result[0]} {result[1]}")
+                    stats_response = client.receive_data()
+                    if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
+                        print("Player stats set successfully on server.")
+                        break
+                    else:
+                        print("Failed to set player stats on server. Retrying...")
+                else:
                     break
 
             run_game_loop(screen, client)

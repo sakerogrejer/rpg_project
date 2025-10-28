@@ -50,6 +50,19 @@ class Server:
         with open(self.server_db_path, 'w') as f:
             json.dump(self.players, f, indent=4)  # Added indent for readability
 
+    def set_player_stats_in_db(self, player_id, stats):
+        # stat_type = ["sword_level", "shield_level", "slaying_potion_level", "healing_potion_level"]
+        if player_id in self.players:
+            self.players[player_id]["stats"] = stats
+            with open(self.server_db_path, 'w') as f:
+                json.dump(self.players, f, indent=4)  # Save updated DB
+
+    def get_player_stats_in_db(self, player_id):
+        if player_id in self.players and "stats" in self.players[player_id]:
+            return self.players[player_id]["stats"]
+        return None
+
+
     def check_db(self, username, password):
         for pid, pdata in self.players.items():
             if pdata["username"] == username and pdata["password"] == password:
@@ -149,6 +162,29 @@ def handle_client_request(server, data, client_address):
             server.send_data(f"LOGINS_COUNT {num_logins}", client_address)
         else:
             server.send_data("LOGINS_FAIL Invalid credentials", client_address)
+
+    elif command.startswith("SET_STATS"):
+        player_id = server.check_db(username, password)
+        if player_id:
+            # Split SET_STATS:value1,value2,...
+            stats_data = command[len("SET_STATS:"):].strip()
+            stats = stats_data.split(",")
+            sword_damage = stats[0]
+            shield_defense = stats[1]
+            slaying_potion_strength = stats[2]
+            healing_potion_strength = stats[3]
+            stats_dict = {
+                "sword_damage": sword_damage,
+                "shield_defense": shield_defense,
+                "slaying_potion_strength": slaying_potion_strength,
+                "healing_potion_strength": healing_potion_strength
+            }
+            server.set_player_stats_in_db(player_id, stats_dict)
+            print(f"Server - Updated stats for player {username} (ID: {player_id})")
+            server.send_data("SET_STATS_SUCCESS", client_address)
+
+        else:
+            server.send_data("SET_STATS_FAIL Invalid credentials", client_address)
 
     else:
         print(f"Server - Received unknown command from {client_address}: {command}")
