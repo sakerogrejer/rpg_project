@@ -15,6 +15,8 @@ class Logger:
             pass
 
         self.logfile = f"logs/{time.strftime('%Y%m%d_%H%M%S')}_log.txt"
+        self.debug_mode = True
+        self.save_logs = False
 
 
     def log(self, message: str) -> None:
@@ -31,31 +33,44 @@ class Logger:
 
     def logfile(self, message: str) -> None:
         # Write to file, if file doesn't exist, create it
-        with open(self.logfile, 'a') as f:
-            f.write(f"{time.strftime('%H%M%S')}" + message + "\n")
+        if self.save_logs:
+            with open(self.logfile, 'a') as f:
+                f.write(f"{time.strftime('%H%M%S')}" + message + "\n")
 
 
 class ClientLogger(Logger):
 
     def log(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Client - {message}"
         Logger.logfile(self, message)
         print(message)
 
     def error(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Client - ERROR: {message}"
         Logger.logfile(self, message)
         print(message)
 
     def info(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Client - INFO: {message}"
         Logger.logfile(self, message)
         print(message)
 
     def warning(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Client - WARNING: {message}"
         Logger.logfile(self, message)
@@ -64,24 +79,36 @@ class ClientLogger(Logger):
 
 class ServerLogger(Logger):
     def log(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Server - {message}"
         Logger.logfile(self, message)
         print(message)
 
     def error(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Server - ERROR: {message}"
         Logger.logfile(self, message)
         print(message)
 
     def info(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Server - INFO: {message}"
         Logger.logfile(self, message)
         print(message)
 
     def warning(self, message: str) -> None:
+        if not self.debug_mode:
+            return
+
         timestamp = time.strftime("%H:%M:%S")
         message = f"{timestamp} -> Server - WARNING: {message}"
         Logger.logfile(self, message)

@@ -1,6 +1,7 @@
 import pygame, json, os, player
-import socket
+import socket, time
 from logger import ServerLogger
+
 
 class Server:
     # --- Server class ---
@@ -10,6 +11,7 @@ class Server:
 
         self.server_address = (host, port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(1.0)  # 1 second timeout for recvfrom
         self.sock.bind(self.server_address)
         self.players = {}  # This is the persistent DB
         self.active_players = {}  # This stores in-memory player objects
@@ -20,6 +22,8 @@ class Server:
         try:
             data, client_address = self.sock.recvfrom(4096)
             return data.decode(), client_address
+        except socket.timeout:
+            return "TIMEOUT", None
         except Exception as e:
             self.sl.error(f"Error receiving data: {e}")  # Use self.sl
             return None, None
@@ -84,6 +88,22 @@ class Server:
     def close(self):
         self.sock.close()
 
+    def check_for_timeouts(self):
+        """
+        Checks for timed-out clients and removes them from active players.
+        """
+        TIMEOUT_DURATION = 15
+        inactive_clients = []
+
+        for address, data in self.active_players.items():
+            time_since_last_ping = time.time() - data['last_ping']
+            if time_since_last_ping > TIMEOUT_DURATION:
+                inactive_clients.append(address)
+
+        for address in inactive_clients:
+            self.sl.warning(f"Client {address} has timed out and will be removed.")
+            del self.active_players[address]
+
 
 # --- End of Server class ---
 
@@ -93,6 +113,10 @@ def handle_client_request(pServer, data, client_address, sl):
     """
     Parses and responds to a single client request.
     """
+
+    if client_address in pServer.active_players:
+        pServer.active_players[client_address]['last_ping'] = time.time()
+
     parts = data.split()
     if len(parts) < 3:
         sl.warning(f"Received malformed data from {client_address}: {data}")
@@ -113,10 +137,21 @@ def handle_client_request(pServer, data, client_address, sl):
             new_player = player.Player()
             new_player.create_profile(username, password)
 
-            # TODO: Load their real data (inventory, stats, etc.)
-            # e.g., new_player.load_inventory(f"{username}_inventory.json")
+            # Load their inventory and stats if available
+            stats = pServer.get_player_stats_in_db(player_id)
+            if stats:
+                new_player.init_stats(
+                    int(stats["sword_damage"]),
+                    int(stats["shield_defense"]),
+                    int(stats["slaying_potion_strength"]),
+                    int(stats["healing_potion_strength"])
+                )
 
-            pServer.active_players[client_address] = new_player
+            pServer.active_players[client_address] = {
+                "player": new_player,
+                "last_ping": time.time()
+            }
+
             pServer.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
 
             # Increment their login count
@@ -149,9 +184,6 @@ def handle_client_request(pServer, data, client_address, sl):
             # Add them to the persistent database
             pServer.add_player_to_db(new_player_id, new_player)
 
-            # TODO: Create their default inventory file
-            # new_player.init_stats(10, 5, 15, 20) # Example stats
-            # new_player.save_inventory(f"{username}_inventory.json")
 
             sl.info(f"New player {username} signed up with ID {new_player_id}")
             pServer.send_data(f"SIGNUP_SUCCESS {new_player_id}", client_address)
@@ -188,40 +220,41 @@ def handle_client_request(pServer, data, client_address, sl):
         else:
             pServer.send_data("SET_STATS_FAIL Invalid credentials", client_address)
 
+    elif command.startswith("GET_STATS"):
+        player_id = pServer.check_db(username, password)
+        if player_id:
+            stats = pServer.get_player_stats_in_db(player_id)
+            if stats:
+                stats_str = f"{stats['sword_damage']},{stats['shield_defense']}," + \
+                            f"{stats['slaying_potion_strength']},{stats['healing_potion_strength']}"
+                pServer.send_data(f"GET_STATS_SUCCESS {stats_str}", client_address)
+                sl.info(f"Sent stats to player {username} (ID: {player_id})")
+            else:
+                pServer.send_data("GET_STATS_FAIL No stats found", client_address)
+        else:
+            pServer.send_data("GET_STATS_FAIL Invalid credentials", client_address)
+
+    elif command.startswith("HEARTBEAT"):
+        pass
+
     else:
         sl.warning(f"Received unknown command from {client_address}: {command}")
 
-def send_alive_ping(pServer, client_address, sl):
-    """
-    Sends an ALIVE ping to the specified client.
-    """
-    try:
-        pServer.send_data("ALIVE", client_address)
-        sl.info(f"Sent ALIVE ping to {client_address}")
-    except Exception as e:
-        sl.error(f"Error sending ALIVE ping to {client_address}: {e}")
-
-def check_client_timeout(pServer, client_address, last_ping_time, timeout_duration, sl):
-    """
-    Checks if the client has timed out based on the last ping time.
-    """
-    current_time = pygame.time.get_ticks()
-    if current_time - last_ping_time > timeout_duration:
-        sl.warning(f"Client {client_address} has timed out.")
-        # Handle timeout (e.g., remove from active players)
-        if client_address in pServer.active_players:
-            del pServer.active_players[client_address]
-        return True
-    return False
 
 # Now takes 'sl' as a parameter
-def run_server_loop(pServer, sl):
+def run_server_loop(pServer, maxPlayers, sl):
     """
     Main loop to listen for and handle client data.
     """
     try:
         while True:
             data, client_address = pServer.receive_data()
+
+            if data == "TIMEOUT":
+                # Check for timed-out clients
+                pServer.check_for_timeouts()
+                continue
+
             if data:
                 # Pass the logger instance down to the handler
                 handle_client_request(pServer, data, client_address, sl)
@@ -242,4 +275,4 @@ if __name__ == "__main__":
     server.load_db()
 
     # 3. Run the main loop, passing the server's logger instance
-    run_server_loop(server, server.sl)
+    run_server_loop(server, 8, server.sl)

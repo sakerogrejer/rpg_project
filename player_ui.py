@@ -179,6 +179,48 @@ class StatSelectUI:
 
         return None
 
+class GameUI:
+    def __init__(self, player):
+        pygame.init()
+        self.screen = pygame.display.set_mode((800, 600))
+        pygame.display.set_caption("Game UI")
+        self.clock = pygame.time.Clock()
+        self.UI_manager = pygame_gui.UIManager((800, 600))
+
+        self.sword_display = InventoryItemDisplay(player.inventory.sword.name,
+                                                  player.inventory.sword.damage)
+
+        self.shield_display = InventoryItemDisplay(player.inventory.shield.name,
+                                                   player.inventory.shield.defense)
+
+        self.slaying_potion_display = InventoryItemDisplay(player.inventory.slaying_potion.name,
+                                                           player.inventory.slaying_potion.strength)
+
+        self.healing_potion_display = InventoryItemDisplay(player.inventory.healing_potion.name,
+                                                           player.inventory.healing_potion.strength)
+
+    def draw(self):
+        time_delta = self.clock.tick(60) / 1000.0
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return
+
+            self.UI_manager.process_events(event)
+
+        self.UI_manager.update(time_delta)
+
+
+        self.screen.fill((0, 0, 0))
+        self.UI_manager.draw_ui(self.screen)
+
+        self.sword_display.draw(self.screen, (50, 50))
+        self.shield_display.draw(self.screen, (50, 100))
+        self.slaying_potion_display.draw(self.screen, (50, 150))
+        self.healing_potion_display.draw(self.screen, (50, 200))
+
+        pygame.display.update()
+
 # horizontal slider element with label and value display
 class LabeledSlider:
     def __init__(self, manager, label_text, rect, start_value, value_range):
@@ -194,6 +236,7 @@ class LabeledSlider:
             start_value=start_value,
             value_range=value_range,
             manager=manager
+
         )
 
         labelRight = self.label.relative_rect.width
@@ -208,10 +251,30 @@ class LabeledSlider:
     def update_value_label(self):
         current_value = int(self.slider.get_current_value())
         self.value_label.set_text(str(current_value))
+        print(f"Slider value updated to: {current_value}")
 
     def get_value(self):
         return int(self.slider.get_current_value())
 
     def get_current_value(self):
         return self.slider.get_current_value()
+
+
+class InventoryItemDisplay:
+    def __init__(self, name, level):
+        self.name = name
+        self.level = level
+
+    def draw(self, surface, position):
+        font = pygame.font.Font(None, 36)
+        text = f"{self.name} (Level {self.level})"
+        text_surface = font.render(text, True, (255, 255, 255))
+        surface.blit(text_surface, position)
+
+    def update_level(self, new_level):
+        self.level = new_level
+
+    def update_name(self, new_name):
+        self.name = new_name
+
 

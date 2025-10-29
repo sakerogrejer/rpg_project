@@ -63,6 +63,7 @@ def handle_login_response(response, cl):
         cl.warning(f"Unknown or empty server response: {response}")
         return False
 
+
 def handle_login_counter(response, cl):
     """
     Parses the server's login counter response.
@@ -79,6 +80,7 @@ def handle_login_counter(response, cl):
     else:
         cl.error(f"Unknown or empty server response: {response}")
         return -1
+
 
 def run_login_screen(screen, client, login_ui, ret_info, cl):
     """
@@ -124,6 +126,7 @@ def run_login_screen(screen, client, login_ui, ret_info, cl):
 
     return False  # Should only be reached if loop exits abnormally
 
+
 def run_stats_selector(screen, client, stats_ui, cl):
     """
     Placeholder for stats selection screen after login.
@@ -140,19 +143,35 @@ def run_stats_selector(screen, client, stats_ui, cl):
 
             if stats_result is not None:
                 sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                cl.info(f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
+                cl.info(
+                    f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
                 return sword_damage, shield_defense, slaying_strength, healing_strength
 
         stats_ui.draw()
 
-    return False # Should only be reached if loop exits abnormally
+    return False  # Should only be reached if loop exits abnormally
 
-def run_game_loop(screen, client, cl):
+
+def client_heartbeat(client, cl):
+    """
+    Sends periodic ALIVE pings to the server to maintain connection.
+    """
+    try:
+        client.send_data(f"HEARTBEAT NONE NONE")
+        cl.info("Sent ALIVE ping to server.")
+    except Exception as e:
+        cl.error(f"Error sending ALIVE ping: {e}")
+
+
+def run_game_loop(screen, client, game_ui, cl):
     """
     Runs the main game loop after the player is logged in.
     """
     running = True
-    clock = pygame.time.Clock()  # Good practice for a game loop
+
+
+    should_heartbeat = pygame.USEREVENT + 1
+    pygame.time.set_timer(should_heartbeat, 5000)  # Every 5
 
     while running:
         # --- Event Loop ---
@@ -160,19 +179,13 @@ def run_game_loop(screen, client, cl):
             if event.type == pygame.QUIT:
                 running = False
 
-        # --- Game Logic ---
-        # (e.g., client.send_data("UPDATE_MY_POSITION ..."))
-        # (e.g., game_state = client.receive_data())
-        # (e.g., update_all_players(game_state))
+            if event.type == should_heartbeat:
+                client_heartbeat(client, cl)
 
-        # --- Drawing ---
-        screen.fill((50, 50, 100))  # Game background
-        # ... draw your game (player, other players, platforms) ...
-
-        pygame.display.flip()
-        clock.tick(60)  # Cap at 60 FPS
+        game_ui.draw()
 
     cl.log("Game loop ended.")
+
 
 #TODO: Add a response timeout for server communications
 
@@ -206,8 +219,9 @@ def main():
                         cl.error(f"{result[0]} quit during stats selection.")
                         return
                     sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                    client.send_data(f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}"+
-                                     f" {result[0]} {result[1]}")
+                    client.send_data(
+                        f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}" +
+                        f" {result[0]} {result[1]}")
                     stats_response = client.receive_data()
                     if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
                         cl.log(f"{result[0]} stats set successfully on server.")
@@ -217,7 +231,27 @@ def main():
                 else:
                     break
 
-            run_game_loop(screen, client, cl)
+
+            # Request player stats from server
+            client.send_data(f"GET_STATS {result[0]} {result[1]}")
+
+            while True:
+                stats_response = client.receive_data()
+                if stats_response and stats_response.startswith("GET_STATS_SUCCESS"):
+                    try:
+                        stats_data = stats_response.split()[1]
+                        sword_damage, shield_defense, slaying_strength, healing_strength = map(int, stats_data.split(','))
+                        client.player.init_stats(sword_damage, shield_defense, slaying_strength, healing_strength)
+                        cl.log(f"Received player stats from server: {stats_data}")
+                        break
+                    except (IndexError, ValueError):
+                        cl.error("Error parsing player stats from server response.")
+                else:
+                    cl.error("Failed to receive player stats from server.")
+
+
+            gm = player_ui.GameUI(client.player)
+            run_game_loop(screen, client, gm, cl)
 
     except KeyboardInterrupt:
         cl.warning("Shutting down client (KeyboardInterrupt).")
@@ -225,6 +259,7 @@ def main():
         cl.warning("Client connection closed.")
         client.close()
         pygame.quit()
+
 
 if __name__ == "__main__":
     main()
