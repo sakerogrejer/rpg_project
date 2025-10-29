@@ -1,25 +1,27 @@
-# In server.py
 import pygame, json, os, player
 import socket
-
+from logger import ServerLogger
 
 class Server:
-    # --- Server class (no changes) ---
+    # --- Server class ---
     def __init__(self, host='localhost', port=9999):
+        # The Server class now creates and owns the logger instance
+        self.sl = ServerLogger()
+
         self.server_address = (host, port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.bind(self.server_address)
         self.players = {}  # This is the persistent DB
         self.active_players = {}  # This stores in-memory player objects
         self.server_db_path = "server_db.json"
-        print(f"Server started at {host}:{port}")
+        self.sl.info(f"Server started at {host}:{port}")  # Use self.sl
 
     def receive_data(self):
         try:
             data, client_address = self.sock.recvfrom(4096)
             return data.decode(), client_address
         except Exception as e:
-            print(f"Server - Error receiving data: {e}")
+            self.sl.error(f"Error receiving data: {e}")  # Use self.sl
             return None, None
 
     def send_data(self, data, client_address):
@@ -27,18 +29,18 @@ class Server:
             message = data.encode()
             self.sock.sendto(message, client_address)
         except Exception as e:
-            print(f"Server - Error sending data: {e}")
+            self.sl.error(f"Error sending data: {e}")  # Use self.sl
 
     def load_db(self):
         try:
             if os.path.exists(self.server_db_path):
                 with open(self.server_db_path, 'r') as f:
                     self.players = json.load(f)
-                print("Server database loaded.")
+                self.sl.info("Server database loaded.")  # Use self.sl
             else:
-                print("No existing server database found. Starting fresh.")
+                self.sl.warning("No existing server database found. Starting fresh.")  # Use self.sl
         except Exception as e:
-            print(f"Error loading server database: {e}")
+            self.sl.error(f"Error loading server database: {e}")  # Use self.sl
             self.players = {}
 
     def add_player_to_db(self, player_id, Player):
@@ -61,7 +63,6 @@ class Server:
         if player_id in self.players and "stats" in self.players[player_id]:
             return self.players[player_id]["stats"]
         return None
-
 
     def check_db(self, username, password):
         for pid, pdata in self.players.items():
@@ -87,13 +88,14 @@ class Server:
 # --- End of Server class ---
 
 
-def handle_client_request(server, data, client_address):
+# Now takes 'sl' as a parameter
+def handle_client_request(pServer, data, client_address, sl):
     """
     Parses and responds to a single client request.
     """
     parts = data.split()
     if len(parts) < 3:
-        print(f"Server - Received malformed data from {client_address}: {data}")
+        sl.warning(f"Received malformed data from {client_address}: {data}")
         return  # Ignore malformed commands
 
     command = parts[0]
@@ -102,10 +104,10 @@ def handle_client_request(server, data, client_address):
 
     # --- Handle LOGIN Command ---
     if command == "LOGIN":
-        player_id = server.check_db(username, password)
+        player_id = pServer.check_db(username, password)
         if player_id:
             # User exists and password is correct
-            print(f"Player {username} (ID: {player_id}) logged in from {client_address}")
+            sl.info(f"Player {username} (ID: {player_id}) logged in from {client_address}")
 
             # Create a new player object for them in memory
             new_player = player.Player()
@@ -114,57 +116,57 @@ def handle_client_request(server, data, client_address):
             # TODO: Load their real data (inventory, stats, etc.)
             # e.g., new_player.load_inventory(f"{username}_inventory.json")
 
-            server.active_players[client_address] = new_player
-            server.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
+            pServer.active_players[client_address] = new_player
+            pServer.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
 
             # Increment their login count
-            server.players[player_id]["logins"] += 1
+            pServer.players[player_id]["logins"] += 1
             try:
-                with open(server.server_db_path, 'w') as f:
-                    json.dump(server.players, f, indent=4)  # Save updated DB
+                with open(pServer.server_db_path, 'w') as f:
+                    json.dump(pServer.players, f, indent=4)  # Save updated DB
             except Exception as e:
-                print(f"Error updating server database: {e}")
+                sl.error(f"Error updating server database: {e}")
 
         else:
             # User not found or wrong password
-            print(f"Server - Failed login attempt for {username} from {client_address}")
-            server.send_data("LOGIN_FAIL Invalid credentials", client_address)
+            sl.info(f"Failed login attempt for {username} from {client_address}")
+            pServer.send_data("LOGIN_FAIL Invalid credentials", client_address)
 
     # --- Handle SIGNUP Command ---
     elif command == "SIGNUP":
-        if server.check_username_exists(username):
+        if pServer.check_username_exists(username):
             # Check if username is already taken
-            print(f"Server - Failed signup, username {username} already exists.")
-            server.send_data("SIGNUP_FAIL Username taken", client_address)
+            sl.info(f"Failed signup, username {username} already exists.")
+            pServer.send_data("SIGNUP_FAIL Username taken", client_address)
         else:
             # Create new player
             new_player = player.Player()
             new_player.create_profile(username, password)
 
             # Create a new ID for them (simple increment)
-            new_player_id = str(len(server.players) + 1)
+            new_player_id = str(len(pServer.players) + 1)
 
             # Add them to the persistent database
-            server.add_player_to_db(new_player_id, new_player)
+            pServer.add_player_to_db(new_player_id, new_player)
 
             # TODO: Create their default inventory file
             # new_player.init_stats(10, 5, 15, 20) # Example stats
             # new_player.save_inventory(f"{username}_inventory.json")
 
-            print(f"Server - New player {username} signed up with ID {new_player_id}")
-            server.send_data(f"SIGNUP_SUCCESS {new_player_id}", client_address)
+            sl.info(f"New player {username} signed up with ID {new_player_id}")
+            pServer.send_data(f"SIGNUP_SUCCESS {new_player_id}", client_address)
 
     elif command == "LOGINS":
-        player_id = server.check_db(username, password)
+        player_id = pServer.check_db(username, password)
         if player_id:
-            print(f"Server - Received login count request from {username} (ID: {player_id})")
-            num_logins = server.get_num_of_logins(player_id)
-            server.send_data(f"LOGINS_COUNT {num_logins}", client_address)
+            sl.info(f"Received login count request from {username} (ID: {player_id})")
+            num_logins = pServer.get_num_of_logins(player_id)
+            pServer.send_data(f"LOGINS_COUNT {num_logins}", client_address)
         else:
-            server.send_data("LOGINS_FAIL Invalid credentials", client_address)
+            pServer.send_data("LOGINS_FAIL Invalid credentials", client_address)
 
     elif command.startswith("SET_STATS"):
-        player_id = server.check_db(username, password)
+        player_id = pServer.check_db(username, password)
         if player_id:
             # Split SET_STATS:value1,value2,...
             stats_data = command[len("SET_STATS:"):].strip()
@@ -179,40 +181,42 @@ def handle_client_request(server, data, client_address):
                 "slaying_potion_strength": slaying_potion_strength,
                 "healing_potion_strength": healing_potion_strength
             }
-            server.set_player_stats_in_db(player_id, stats_dict)
-            print(f"Server - Updated stats for player {username} (ID: {player_id})")
-            server.send_data("SET_STATS_SUCCESS", client_address)
+            pServer.set_player_stats_in_db(player_id, stats_dict)
+            sl.info(f"Updated stats for player {username} (ID: {player_id})")
+            pServer.send_data("SET_STATS_SUCCESS", client_address)
 
         else:
-            server.send_data("SET_STATS_FAIL Invalid credentials", client_address)
+            pServer.send_data("SET_STATS_FAIL Invalid credentials", client_address)
 
     else:
-        print(f"Server - Received unknown command from {client_address}: {command}")
+        sl.warning(f"Received unknown command from {client_address}: {command}")
 
-def run_server_loop(server):
+
+# Now takes 'sl' as a parameter
+def run_server_loop(pServer, sl):
     """
     Main loop to listen for and handle client data.
     """
     try:
         while True:
-            data, client_address = server.receive_data()
+            data, client_address = pServer.receive_data()
             if data:
-                # Pass the data to the handler function
-                handle_client_request(server, data, client_address)
+                # Pass the logger instance down to the handler
+                handle_client_request(pServer, data, client_address, sl)
 
     except KeyboardInterrupt:
-        print("\nShutting down server (KeyboardInterrupt).")
+        sl.info("\nShutting down server (KeyboardInterrupt).")
     finally:
-        print("Server - Closing server socket.")
-        server.close()
+        sl.info("Closing server socket.")
+        pServer.close()
 
 
 if __name__ == "__main__":
-    # 1. Initialize the server object
+    # 1. Initialize the server object (this also creates server.sl)
     server = Server()
 
-    # 2. Load persistent data
+    # 2. Load persistent data (uses server.sl internally)
     server.load_db()
 
-    # 3. Run the main loop
-    run_server_loop(server)
+    # 3. Run the main loop, passing the server's logger instance
+    run_server_loop(server, server.sl)

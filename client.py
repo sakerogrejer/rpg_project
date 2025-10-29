@@ -3,6 +3,8 @@
 import pygame, player, player_ui, platform
 import socket
 
+from logger import ClientLogger
+
 
 class Client:
     # --- Client class (no changes) ---
@@ -10,20 +12,21 @@ class Client:
         self.server_address = (server_ip, server_port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.player = player.Player()
+        self.cl = ClientLogger()
 
     def send_data(self, data):
         try:
             message = data.encode()
             self.sock.sendto(message, self.server_address)
         except Exception as e:
-            print(f"Error sending data: {e}")
+            self.cl.error(f"Error sending data: {e}")
 
     def receive_data(self):
         try:
             data, _ = self.sock.recvfrom(4096)
             return data.decode()
         except Exception as e:
-            print(f"Error receiving data: {e}")
+            self.cl.error(f"Error receiving data: {e}")
             return None
 
     def close(self):
@@ -33,34 +36,34 @@ class Client:
 # --- End of Client class ---
 
 
-def handle_login_response(response):
+def handle_login_response(response, cl):
     """
     Parses the server's login/signup response.
     Returns True if login was successful, False otherwise.
     """
     if response and response.startswith("LOGIN_SUCCESS"):
-        print("Login successful!")
+        cl.log("Login successful!")
         # player_id = response.split()[1] # You can store this if needed
         return True
 
     elif response and response.startswith("SIGNUP_SUCCESS"):
-        print("Sign-up successful! Please log in.")
+        cl.log("Sign-up successful! Please log in.")
         # Or, you could modify this to auto-login and return True
         return False
 
     elif response and response.startswith("LOGIN_FAIL"):
-        print(f"Login failed: {response.split(maxsplit=1)[1]}")
+        cl.error(f"Login failed: {response.split(maxsplit=1)[1]}")
         return False
 
     elif response and response.startswith("SIGNUP_FAIL"):
-        print(f"Sign-up failed: {response.split(maxsplit=1)[1]}")
+        cl.error(f"Sign-up failed: {response.split(maxsplit=1)[1]}")
         return False
 
     else:
-        print(f"Unknown or empty server response: {response}")
+        cl.warning(f"Unknown or empty server response: {response}")
         return False
 
-def handle_login_counter(response):
+def handle_login_counter(response, cl):
     """
     Parses the server's login counter response.
     Returns the number of logins if successful, -1 otherwise.
@@ -68,16 +71,16 @@ def handle_login_counter(response):
     if response and response.startswith("LOGINS_COUNT"):
         try:
             count = int(response.split()[1])
-            print(f"Client - Number of previous logins: {count}")
+            cl.info(f"Number of previous logins: {count}")
             return count
         except (IndexError, ValueError):
-            print("Error parsing login count from server response.")
+            cl.error("Error parsing login count from server response.")
             return -1
     else:
-        print(f"Unknown or empty server response: {response}")
+        cl.error(f"Unknown or empty server response: {response}")
         return -1
 
-def run_login_screen(screen, client, login_ui, ret_info):
+def run_login_screen(screen, client, login_ui, ret_info, cl):
     """
     Shows the login UI and handles login/signup logic.
     Returns True if login is successful, False if the user quits.
@@ -99,7 +102,7 @@ def run_login_screen(screen, client, login_ui, ret_info):
                 password = player.hash_password(password)
 
                 if not username or not password:
-                    print("Username and password cannot be empty.")
+                    cl.error("Username and password cannot be empty.")
                     continue  # Skip this event, wait for more input
 
                 # Send the correct command based on the button pressed
@@ -111,7 +114,7 @@ def run_login_screen(screen, client, login_ui, ret_info):
                 response = client.receive_data()
 
                 # Check if the response means we are logged in
-                if handle_login_response(response):
+                if handle_login_response(response, cl):
                     ret_info.append(username)
                     ret_info.append(password)
                     return True  # Login was successful!
@@ -121,7 +124,7 @@ def run_login_screen(screen, client, login_ui, ret_info):
 
     return False  # Should only be reached if loop exits abnormally
 
-def run_stats_selector(screen, client, stats_ui):
+def run_stats_selector(screen, client, stats_ui, cl):
     """
     Placeholder for stats selection screen after login.
     """
@@ -137,14 +140,14 @@ def run_stats_selector(screen, client, stats_ui):
 
             if stats_result is not None:
                 sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                print(f"Client - Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
+                cl.info(f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
                 return sword_damage, shield_defense, slaying_strength, healing_strength
 
         stats_ui.draw()
 
     return False # Should only be reached if loop exits abnormally
 
-def run_game_loop(screen, client):
+def run_game_loop(screen, client, cl):
     """
     Runs the main game loop after the player is logged in.
     """
@@ -169,7 +172,7 @@ def run_game_loop(screen, client):
         pygame.display.flip()
         clock.tick(60)  # Cap at 60 FPS
 
-    print("Game loop ended.")
+    cl.log("Game loop ended.")
 
 #TODO: Add a response timeout for server communications
 #TODO: Ensure network connection before increasing login count
@@ -180,49 +183,49 @@ def main():
     screen = pygame.display.set_mode((800, 600))
     login_ui = player_ui.LoginUI()
     client = Client('localhost', 9999)
+    cl = client.cl
 
     try:
         # Step 1: Run the login screen. This loop will run
         # until the user logs in or quits.
         result = []
-        login_successful = run_login_screen(screen, client, login_ui, result)
+        login_successful = run_login_screen(screen, client, login_ui, result, cl)
 
         # Step 2: If login was successful, run the game
         if login_successful:
-            print("Moving to game loop...")
-            print(f"LOGINS {result[0]} {result[1]}")
+            cl.log("Moving to game loop...")
+            cl.info(f"LOGINS {result[0]} {result[1]}")
             client.send_data(f"LOGINS {result[0]} {result[1]}")
 
             while True:
                 response = client.receive_data()
-                login_count = handle_login_counter(response)
+                login_count = handle_login_counter(response, cl)
                 if response is not None and login_count <= 1:
                     stats_ui = player_ui.StatSelectUI()
-                    stats_result = run_stats_selector(screen, client, stats_ui)
+                    stats_result = run_stats_selector(screen, client, stats_ui, cl)
                     if stats_result is None:
-                        print("User quit during stats selection.")
+                        cl.error("User quit during stats selection.")
                         return
                     sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
                     client.send_data(f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}"+
                                      f" {result[0]} {result[1]}")
                     stats_response = client.receive_data()
                     if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
-                        print("Player stats set successfully on server.")
+                        cl.log("Player stats set successfully on server.")
                         break
                     else:
-                        print("Failed to set player stats on server. Retrying...")
+                        cl.error("Failed to set player stats on server. Retrying...")
                 else:
                     break
 
-            run_game_loop(screen, client)
+            run_game_loop(screen, client, cl)
 
     except KeyboardInterrupt:
-        print("Shutting down client (KeyboardInterrupt).")
+        cl.warning("Shutting down client (KeyboardInterrupt).")
     finally:
-        print("Client connection closed.")
+        cl.warning("Client connection closed.")
         client.close()
         pygame.quit()
-
 
 if __name__ == "__main__":
     main()
