@@ -225,24 +225,35 @@ class GameUI:
 class LabeledSlider:
     def __init__(self, manager, label_text, rect, start_value, value_range):
 
+
+        # Split the width for the top row (the labels)
+        label_width = int(rect.width * 0.7)  # Main label gets 70%
+        value_width = rect.width - label_width  # Value label gets 30%
+
+        # Calculate X position for the value label
+        value_x_pos = rect.x + label_width
+
+
         self.label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((rect.x, rect.y), (rect.width, 30)),
+            # Use the new calculated width
+            relative_rect=pygame.Rect((rect.x, rect.y), (label_width, 30)),
             text=label_text,
             manager=manager
         )
 
         self.slider = pygame_gui.elements.UIHorizontalSlider(
+            # The slider is on the next row, so its position is fine
             relative_rect=pygame.Rect((rect.x, rect.y + 40), (rect.width, 30)),
             start_value=start_value,
             value_range=value_range,
             manager=manager
-
         )
 
-        labelRight = self.label.relative_rect.width
+        # No longer need 'labelRight'
         # value label next to the label
         self.value_label = pygame_gui.elements.UILabel(
-            relative_rect=pygame.Rect((rect.x, rect.y), (rect.width + (labelRight // 2), 30)),
+            # Use the new X position and width
+            relative_rect=pygame.Rect((value_x_pos, rect.y), (value_width, 30)),
             text=str(start_value),
             manager=manager
         )
