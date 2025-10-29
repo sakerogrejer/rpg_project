@@ -175,7 +175,6 @@ def run_game_loop(screen, client, cl):
     cl.log("Game loop ended.")
 
 #TODO: Add a response timeout for server communications
-#TODO: Ensure network connection before increasing login count
 
 def main():
     """Main function to initialize and run the client."""
@@ -204,17 +203,17 @@ def main():
                     stats_ui = player_ui.StatSelectUI()
                     stats_result = run_stats_selector(screen, client, stats_ui, cl)
                     if stats_result is None:
-                        cl.error("User quit during stats selection.")
+                        cl.error(f"{result[0]} quit during stats selection.")
                         return
                     sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
                     client.send_data(f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}"+
                                      f" {result[0]} {result[1]}")
                     stats_response = client.receive_data()
                     if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
-                        cl.log("Player stats set successfully on server.")
+                        cl.log(f"{result[0]} stats set successfully on server.")
                         break
                     else:
-                        cl.error("Failed to set player stats on server. Retrying...")
+                        cl.error(f"Failed to set {result[0]} stats on server. Retrying...")
                 else:
                     break
 

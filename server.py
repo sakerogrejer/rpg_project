@@ -191,6 +191,28 @@ def handle_client_request(pServer, data, client_address, sl):
     else:
         sl.warning(f"Received unknown command from {client_address}: {command}")
 
+def send_alive_ping(pServer, client_address, sl):
+    """
+    Sends an ALIVE ping to the specified client.
+    """
+    try:
+        pServer.send_data("ALIVE", client_address)
+        sl.info(f"Sent ALIVE ping to {client_address}")
+    except Exception as e:
+        sl.error(f"Error sending ALIVE ping to {client_address}: {e}")
+
+def check_client_timeout(pServer, client_address, last_ping_time, timeout_duration, sl):
+    """
+    Checks if the client has timed out based on the last ping time.
+    """
+    current_time = pygame.time.get_ticks()
+    if current_time - last_ping_time > timeout_duration:
+        sl.warning(f"Client {client_address} has timed out.")
+        # Handle timeout (e.g., remove from active players)
+        if client_address in pServer.active_players:
+            del pServer.active_players[client_address]
+        return True
+    return False
 
 # Now takes 'sl' as a parameter
 def run_server_loop(pServer, sl):
@@ -203,6 +225,7 @@ def run_server_loop(pServer, sl):
             if data:
                 # Pass the logger instance down to the handler
                 handle_client_request(pServer, data, client_address, sl)
+
 
     except KeyboardInterrupt:
         sl.info("\nShutting down server (KeyboardInterrupt).")

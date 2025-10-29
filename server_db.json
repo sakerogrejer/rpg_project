@@ -2,12 +2,12 @@
     "1": {
         "username": "a",
         "password": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
-        "logins": 1,
+        "logins": 5,
         "stats": {
-            "sword_damage": "2",
-            "shield_defense": "1",
-            "slaying_potion_strength": "3",
-            "healing_potion_strength": "1"
+            "sword_damage": "1",
+            "shield_defense": "2",
+            "slaying_potion_strength": "1",
+            "healing_potion_strength": "2"
         }
     }
 }
