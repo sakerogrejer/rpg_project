@@ -1,14 +1,17 @@
+from tkinter import Image
+
 import pygame
+from pygame_gui.windows import ui_file_dialog
 import pygame_gui
 
 class LoginUI:
 
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode((400, 400))
+        self.screen = pygame.display.set_mode((600, 400))
         pygame.display.set_caption("Login UI")
         self.clock = pygame.time.Clock()
-        self.UI_manager = pygame_gui.UIManager((400, 400))
+        self.UI_manager = pygame_gui.UIManager((600, 400))
         self.usernameField = ""
         self.passwordField = ""
         self.username_label = pygame_gui.elements.UILabel(
@@ -51,7 +54,6 @@ class LoginUI:
         )
 
 
-
     def draw(self):
         time_delta = self.clock.tick(60) / 1000.0
         for event in pygame.event.get():
@@ -86,6 +88,7 @@ class LoginUI:
 
 class StatSelectUI:
 
+
     def __init__(self):
         pygame.init()
 
@@ -95,18 +98,6 @@ class StatSelectUI:
         pygame.display.set_caption("Login UI")
         self.clock = pygame.time.Clock()
         self.UI_manager = pygame_gui.UIManager((width, height))
-
-        """
-                --- Label ---         20%
-        --- Sword Strength Slider --- 80%
-                --- Label ---         20%
-        --- Shield Defense Slider --- 80%
-                --- Label ---         20%
-        --- Slaying Potion Strength Slider --- 80%
-                --- Label ---         20%
-        --- Healing Potion Strength Slider --- 80%
-                --- Confirm Button --- 100%
-        """
 
         self.sword_strength = LabeledSlider(
             manager=self.UI_manager,
@@ -146,20 +137,68 @@ class StatSelectUI:
             manager=self.UI_manager
         )
 
-        
+        # --- FIX: Pass the size to the constructor ---
+        self.profile_picture = ImageButton(
+            image_path='assets/profile_icon.png',
+            position=(370, 25),
+            manager=self.UI_manager,
+            size=(64, 64)  # Specify the size you want
+        )
+
+        # --- ADD THIS LINE ---
+        self.file_dialog = None
+
+
     def draw(self):
         time_delta = self.clock.tick(60) / 1000.0
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
                 return
 
+            # --- START OF ALL FIXES ---
+
+            # 1. Call your handle_event method for the confirm button
+            result = self.handle_event(event)
+            if result:
+                print("Stats confirmed:", result)
+
+            # 2. Check if the image button was clicked
+            # We also check if a dialog is NOT already open
+            if self.file_dialog is None:
+                if self.profile_picture.handle_event(event):
+                    # If clicked, create the dialog and store a reference to it
+                    self.file_dialog = ui_file_dialog.UIFileDialog(
+                        rect=pygame.Rect(100, 100, 400, 300),
+                        manager=self.UI_manager,
+                        window_title="Select Profile Picture",
+                        initial_file_path=".",
+                        allow_existing_files_only=True
+                    )
+
+            # 3. Check for events FROM the file dialog
+
+            # This event fires when the user clicks 'Open'
+            if event.type == pygame_gui.UI_FILE_DIALOG_PATH_PICKED:
+                if event.ui_element == self.file_dialog:
+                    # Get the path and update the image
+                    self.profile_picture.set_new_image(event.text)
+                    self.file_dialog = None  # We're done, reset the tracker
+
+            # This event fires when the user clicks 'Cancel' or the 'X'
+            if event.type == pygame_gui.UI_WINDOW_CLOSE:
+                if event.ui_element == self.file_dialog:
+                    self.file_dialog = None  # We're done, reset the tracker
+
+            # 4. Pass the event to the UI Manager (as you were)
             self.UI_manager.process_events(event)
 
         self.UI_manager.update(time_delta)
-
         self.screen.fill((0, 0, 0))
         self.UI_manager.draw_ui(self.screen)
+
+
         self.sword_strength.update_value_label()
         self.shield_defense.update_value_label()
         self.slaying_strength.update_value_label()
@@ -167,7 +206,9 @@ class StatSelectUI:
 
         pygame.display.update()
 
+
     def handle_event(self, event):
+        # This method is now correctly called from the draw() loop
         if event.type == pygame_gui.UI_BUTTON_PRESSED:
             if event.ui_element == self.confirm_button:
                 sword_damage = int(self.sword_strength.get_current_value())
@@ -262,7 +303,6 @@ class LabeledSlider:
     def update_value_label(self):
         current_value = int(self.slider.get_current_value())
         self.value_label.set_text(str(current_value))
-        print(f"Slider value updated to: {current_value}")
 
     def get_value(self):
         return int(self.slider.get_current_value())
@@ -288,4 +328,42 @@ class InventoryItemDisplay:
     def update_name(self, new_name):
         self.name = new_name
 
+class ImageButton:
+    def __init__(self, image_path, position, manager, size=(64, 64)):
+        self.size = size
+        self.manager = manager
 
+        self.image_surface = pygame.image.load(image_path)
+        self.image_surface = pygame.transform.scale(self.image_surface, self.size)
+
+        self.rect = self.image_surface.get_rect(topleft=position)
+
+        self.ui_element = pygame_gui.elements.UIImage(
+            relative_rect=self.rect,
+            image_surface=self.image_surface,
+            manager=self.manager
+        )
+
+    # This method is called by StatSelectUI when the dialog is successful.
+    def set_new_image(self, file_path):
+        """Loads, scales, and sets a new image for the UI element."""
+        try:
+            self.image_surface = pygame.image.load(file_path)
+            self.image_surface = pygame.transform.scale(self.image_surface, self.size)
+            self.ui_element.set_image(self.image_surface)
+        except pygame.error as e:
+            print(f"Error loading image {file_path}: {e}")
+
+    # This function just reports if it was clicked.
+    def handle_event(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN:
+            if event.button == 1:  # Left mouse button
+                if self.ui_element.rect.collidepoint(event.pos):
+                    return True  # Signal that we were clicked
+        return False
+
+    def get_image_path(self):
+        return self.image_surface
+
+    # DO NOT add a draw() method here
+    # DO NOT add an is_clicked() method here
