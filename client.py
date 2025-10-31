@@ -187,8 +187,6 @@ def run_game_loop(screen, client, game_ui, cl):
     cl.log("Game loop ended.")
 
 
-#TODO: Add a response timeout for server communications
-
 def main():
     """Main function to initialize and run the client."""
     pygame.init()

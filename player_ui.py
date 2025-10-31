@@ -157,9 +157,7 @@ class StatSelectUI:
                 pygame.quit()
                 return
 
-            # --- START OF ALL FIXES ---
 
-            # 1. Call your handle_event method for the confirm button
             result = self.handle_event(event)
             if result:
                 print("Stats confirmed:", result)
