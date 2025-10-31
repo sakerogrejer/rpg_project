@@ -1,4 +1,4 @@
-import pygame, json, os, player
+import json, os, player
 import socket, time
 from logger import ServerLogger
 

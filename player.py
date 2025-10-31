@@ -1,6 +1,5 @@
 import json, os
 from enum import Enum
-import pygame
 
 class Sword:
     def __init__(self, name, damage):

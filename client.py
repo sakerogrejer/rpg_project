@@ -1,8 +1,13 @@
 # client.py
 
-import pygame, player, player_ui, platform
 import socket
+import getpass  # For securely reading a password
+import threading  # For the non-blocking heartbeat
+import sys  # For exiting the program
+import time
 
+# Assuming player.py and logger.py exist in the same directory
+import player
 from logger import ClientLogger
 
 
@@ -40,15 +45,14 @@ def handle_login_response(response, cl):
     """
     Parses the server's login/signup response.
     Returns True if login was successful, False otherwise.
+    (No changes from original)
     """
     if response and response.startswith("LOGIN_SUCCESS"):
         cl.log("Login successful!")
-        # player_id = response.split()[1] # You can store this if needed
         return True
 
     elif response and response.startswith("SIGNUP_SUCCESS"):
         cl.log("Sign-up successful! Please log in.")
-        # Or, you could modify this to auto-login and return True
         return False
 
     elif response and response.startswith("LOGIN_FAIL"):
@@ -68,6 +72,7 @@ def handle_login_counter(response, cl):
     """
     Parses the server's login counter response.
     Returns the number of logins if successful, -1 otherwise.
+    (No changes from original)
     """
     if response and response.startswith("LOGINS_COUNT"):
         try:
@@ -82,79 +87,102 @@ def handle_login_counter(response, cl):
         return -1
 
 
-def run_login_screen(screen, client, login_ui, ret_info, cl):
+def run_login_cli(client, ret_info, cl):
     """
-    Shows the login UI and handles login/signup logic.
+    Handles the login/signup logic via the command line.
     Returns True if login is successful, False if the user quits.
     """
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return False  # User quit the program
+    while True:
+        print("\n--- Welcome ---")
+        print("1. Login")
+        print("2. Sign Up")
+        print("3. Quit")
+        choice = input("Enter your choice (1-3): ").strip()
 
-            # Let the UI handle the event
-            login_result = login_ui.handle_event(event)
+        if choice == '3':
+            return False  # User quit
 
-            # login_result is (action, username, password) if a button was clicked
-            if login_result is not None:
-                action, username, password = login_result
+        if choice in ('1', '2'):
+            username = input("Username: ").strip()
+            # Use getpass to hide password entry
+            password_plain = getpass.getpass("Password: ").strip()
 
-                # Hash the password before sending
-                password = player.hash_password(password)
+            if not username or not password_plain:
+                cl.error("Username and password cannot be empty.")
+                continue  # Ask for choice again
 
-                if not username or not password:
-                    cl.error("Username and password cannot be empty.")
-                    continue  # Skip this event, wait for more input
+            # Hash the password before sending
+            password_hashed = player.hash_password(password_plain)
 
-                # Send the correct command based on the button pressed
-                if action == 'login':
-                    client.send_data(f"LOGIN {username} {password}")
-                elif action == 'signup':
-                    client.send_data(f"SIGNUP {username} {password}")
+            action = "LOGIN" if choice == '1' else "SIGNUP"
+            client.send_data(f"{action} {username} {password_hashed}")
 
-                response = client.receive_data()
+            response = client.receive_data()
 
-                # Check if the response means we are logged in
-                if handle_login_response(response, cl):
-                    ret_info.append(username)
-                    ret_info.append(password)
-                    return True  # Login was successful!
+            # Check if the response means we are logged in
+            if handle_login_response(response, cl):
+                ret_info.append(username)
+                ret_info.append(password_hashed)  # Store the hashed password
+                return True  # Login was successful!
 
-        # Draw the login UI
-        login_ui.draw()
+            # If login/signup failed or was signup, the loop continues
 
-    return False  # Should only be reached if loop exits abnormally
+        else:
+            cl.warning("Invalid choice. Please enter 1, 2, or 3.")
 
 
-def run_stats_selector(screen, client, stats_ui, cl):
+def get_stat_input(prompt, cl):
+    """Helper function to get a single valid integer stat from the user."""
+    while True:
+        try:
+            value_str = input(prompt)
+            value_int = int(value_str)
+            if value_int < 0:
+                cl.warning("Stat value must be non-negative.")
+                continue
+            return value_int
+        except ValueError:
+            cl.error("Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            cl.warning("\nStat selection cancelled.")
+            return None
+
+
+def run_stats_selector_cli(cl):
     """
-    Placeholder for stats selection screen after login.
+    Prompts the user to enter their stats via the command line.
+    Returns (sword, shield, slaying, healing) or None if user quits.
     """
-    # For simplicity, we'll just return some default stats.
-    # You can implement a full UI here similar to the login UI.
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return None  # User quit the program
+    cl.log("This appears to be your first login. Please set your stats.")
+    print("--- Stat Selection ---")
 
-            stats_result = stats_ui.handle_event(event)
+    try:
+        sword_damage = get_stat_input("Enter Sword Damage: ", cl)
+        if sword_damage is None: return None
 
-            if stats_result is not None:
-                sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                cl.info(
-                    f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, Slaying {slaying_strength}, Healing {healing_strength}")
-                return sword_damage, shield_defense, slaying_strength, healing_strength
+        shield_defense = get_stat_input("Enter Shield Defense: ", cl)
+        if shield_defense is None: return None
 
-        stats_ui.draw()
+        slaying_strength = get_stat_input("Enter Slaying Strength: ", cl)
+        if slaying_strength is None: return None
 
-    return False  # Should only be reached if loop exits abnormally
+        healing_strength = get_stat_input("Enter Healing Strength: ", cl)
+        if healing_strength is None: return None
+
+        cl.info(
+            f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, "
+            f"Slaying {slaying_strength}, Healing {healing_strength}")
+        return sword_damage, shield_defense, slaying_strength, healing_strength
+
+    except KeyboardInterrupt:
+        cl.warning("\nStat selection cancelled.")
+        return None
 
 
 def client_heartbeat(client, cl):
     """
     Sends periodic ALIVE pings to the server to maintain connection.
+    (No changes from original)
     """
     try:
         client.send_data(f"HEARTBEAT NONE NONE")
@@ -163,100 +191,160 @@ def client_heartbeat(client, cl):
         cl.error(f"Error sending ALIVE ping: {e}")
 
 
-def run_game_loop(screen, client, game_ui, cl):
+def run_game_loop_cli(client, cl):
     """
     Runs the main game loop after the player is logged in.
+    Uses a thread for the heartbeat and waits for user input.
     """
-    running = True
 
+    # Use an event to signal the heartbeat thread to stop
+    stop_event = threading.Event()
 
-    should_heartbeat = pygame.USEREVENT + 1
-    pygame.time.set_timer(should_heartbeat, 5000)  # Every 5
+    def heartbeat_task():
+        """This function will run in a separate thread."""
+        while not stop_event.is_set():
+            client_heartbeat(client, cl)
+            # Wait 5 seconds, but check the stop_event every second
+            # This makes shutdown much faster
+            for _ in range(5):
+                if stop_event.is_set():
+                    break
+                time.sleep(1)
 
-    while running:
-        # --- Event Loop ---
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+    # Start the heartbeat thread
+    heartbeat_thread = threading.Thread(target=heartbeat_task, daemon=True)
+    heartbeat_thread.start()
 
-            if event.type == should_heartbeat:
-                client_heartbeat(client, cl)
+    cl.log("Game loop started. Type 'stats' to see your stats or 'quit' to exit.")
 
-        game_ui.draw()
+    try:
+        while True:
+            command = input("> ").strip().lower()
 
-    cl.log("Game loop ended.")
+            if command == 'quit':
+                cl.log("Quitting...")
+                break
+
+            elif command == 'stats':
+                # Access the stats stored in the client's player object
+                try:
+                    stats_str = (
+                        f"Current Stats - "
+                        f"Sword: {client.player.sword_damage}, "
+                        f"Shield: {client.player.shield_defense}, "
+                        f"Slaying: {client.player.slaying_strength}, "
+                        f"Healing: {client.player.healing_strength}"
+                    )
+                    cl.info(stats_str)
+                except AttributeError:
+                    cl.error("Player stats not initialized yet.")
+
+            else:
+                cl.warning(f"Unknown command: '{command}'. Try 'stats' or 'quit'.")
+
+    except KeyboardInterrupt:
+        cl.log("\nCaught Ctrl+C. Shutting down game loop.")
+
+    finally:
+        # Signal the heartbeat thread to stop
+        cl.log("Stopping heartbeat timer...")
+        stop_event.set()
+        heartbeat_thread.join(timeout=2)  # Wait for thread to finish
+        cl.log("Game loop ended.")
 
 
 def main():
     """Main function to initialize and run the client."""
-    pygame.init()
-    screen = pygame.display.set_mode((800, 600))
-    login_ui = player_ui.LoginUI()
+    # No Pygame init
+
     client = Client('localhost', 9999)
     cl = client.cl
 
     try:
-        # Step 1: Run the login screen. This loop will run
-        # until the user logs in or quits.
-        result = []
-        login_successful = run_login_screen(screen, client, login_ui, result, cl)
+        # Step 1: Run the login screen.
+        result = []  # Will store [username, hashed_password]
+        login_successful = run_login_cli(client, result, cl)
 
         # Step 2: If login was successful, run the game
-        if login_successful:
-            cl.log("Moving to game loop...")
-            cl.info(f"LOGINS {result[0]} {result[1]}")
-            client.send_data(f"LOGINS {result[0]} {result[1]}")
+        if not login_successful:
+            cl.warning("User quit at login. Exiting.")
+            client.close()
+            sys.exit(0)
 
-            while True:
-                response = client.receive_data()
-                login_count = handle_login_counter(response, cl)
-                if response is not None and login_count <= 1:
-                    stats_ui = player_ui.StatSelectUI()
-                    stats_result = run_stats_selector(screen, client, stats_ui, cl)
-                    if stats_result is None:
-                        cl.error(f"{result[0]} quit during stats selection.")
-                        return
-                    sword_damage, shield_defense, slaying_strength, healing_strength = stats_result
-                    client.send_data(
-                        f"SET_STATS:{sword_damage},{shield_defense},{slaying_strength},{healing_strength}" +
-                        f" {result[0]} {result[1]}")
-                    stats_response = client.receive_data()
-                    if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
-                        cl.log(f"{result[0]} stats set successfully on server.")
-                        break
-                    else:
-                        cl.error(f"Failed to set {result[0]} stats on server. Retrying...")
-                else:
-                    break
+        cl.log("Moving to game setup...")
+        username = result[0]
+        hashed_password = result[1]
 
+        cl.info(f"Requesting login count for {username}...")
+        client.send_data(f"LOGINS {username} {hashed_password}")
 
-            # Request player stats from server
-            client.send_data(f"GET_STATS {result[0]} {result[1]}")
+        while True:
+            response = client.receive_data()
+            if response is None:
+                cl.error("No response from server for LOGINS request. Retrying...")
+                client.send_data(f"LOGINS {username} {hashed_password}")
+                time.sleep(1)
+                continue
 
-            while True:
+            login_count = handle_login_counter(response, cl)
+            if login_count == -1:
+                cl.error("Failed to parse login count. Retrying...")
+                client.send_data(f"LOGINS {username} {hashed_password}")
+                time.sleep(1)
+                continue
+
+            # If first login, run stat selector
+            if login_count <= 1:
+                stats_result = run_stats_selector_cli(cl)
+                if stats_result is None:
+                    cl.error(f"{username} quit during stats selection. Exiting.")
+                    return  # Finally block will handle cleanup
+
+                sword, shield, slaying, healing = stats_result
+                client.send_data(
+                    f"SET_STATS:{sword},{shield},{slaying},{healing}" +
+                    f" {username} {hashed_password}")
+
                 stats_response = client.receive_data()
-                if stats_response and stats_response.startswith("GET_STATS_SUCCESS"):
-                    try:
-                        stats_data = stats_response.split()[1]
-                        sword_damage, shield_defense, slaying_strength, healing_strength = map(int, stats_data.split(','))
-                        client.player.init_stats(sword_damage, shield_defense, slaying_strength, healing_strength)
-                        cl.log(f"Received player stats from server: {stats_data}")
-                        break
-                    except (IndexError, ValueError):
-                        cl.error("Error parsing player stats from server response.")
+                if stats_response and stats_response.startswith("SET_STATS_SUCCESS"):
+                    cl.log(f"{username} stats set successfully on server.")
+                    break  # Break from the while loop
                 else:
-                    cl.error("Failed to receive player stats from server.")
+                    cl.error(f"Failed to set {username} stats on server. Retrying stat selection...")
+                    # Loop will continue, re-prompting for stats (or you could exit)
+            else:
+                cl.log("Existing user. Skipping stat selection.")
+                break  # Break from the while loop
 
+        # Request player stats from server
+        cl.log("Requesting player stats from server...")
+        client.send_data(f"GET_STATS {username} {hashed_password}")
 
-            gm = player_ui.GameUI(client.player)
-            run_game_loop(screen, client, gm, cl)
+        while True:
+            stats_response = client.receive_data()
+            if stats_response and stats_response.startswith("GET_STATS_SUCCESS"):
+                try:
+                    stats_data = stats_response.split(maxsplit=1)[1]
+                    sword_damage, shield_defense, slaying_strength, healing_strength = map(int, stats_data.split(','))
+                    client.player.init_stats(sword_damage, shield_defense, slaying_strength, healing_strength)
+                    cl.log(f"Received player stats from server: {stats_data}")
+                    break  # Success
+                except (IndexError, ValueError) as e:
+                    cl.error(f"Error parsing player stats from server response: {e}")
+            else:
+                cl.error(f"Failed to receive player stats from server. Response: {stats_response}. Retrying...")
+                client.send_data(f"GET_STATS {username} {hashed_password}")
+                time.sleep(2)  # Wait before retrying
+
+        # Run the main interactive game loop
+        run_game_loop_cli(client, cl)
 
     except KeyboardInterrupt:
-        cl.warning("Shutting down client (KeyboardInterrupt).")
+        cl.warning("\nShutting down client (KeyboardInterrupt).")
     finally:
         cl.warning("Client connection closed.")
         client.close()
-        pygame.quit()
+        # No pygame.quit()
 
 
 if __name__ == "__main__":
