@@ -1,10 +1,11 @@
 # client.py
-
+import os
 import socket
 import getpass  # For securely reading a password
 import threading  # For the non-blocking heartbeat
 import sys  # For exiting the program
 import time
+import select
 
 # Assuming player.py and logger.py exist in the same directory
 import player
@@ -18,6 +19,7 @@ class Client:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.player = player.Player()
         self.cl = ClientLogger()
+        self.suppress_output = True
 
     def send_data(self, data):
         try:
@@ -37,8 +39,51 @@ class Client:
     def close(self):
         self.sock.close()
 
-
-# --- End of Client class ---
+#
+def server_listener_task(self, cl, stop_event):
+       """
+       This function runs in a separate thread.
+       It waits for incoming messages from the server and prints them.
+       """
+       while not stop_event.is_set():
+           try:
+               # Use select to wait for data on the socket with a 1-second timeout
+               # This allows the loop to check the stop_event every second
+               ready_to_read, _, _ = select.select([self.sock], [], [], 1.0)
+               # If the socket is ready, there's data to read
+               if ready_to_read:
+                   response = self.receive_data()
+                   if response:
+                       # --- Handle all ASYNCHRONOUS messages here ---
+                       if response.startswith("P2P_MESSAGE_FROM"):
+                           # Format from server: P2P_MESSAGE_FROM sender_username:message_text
+                           try:
+                               # Split only on the first colon
+                               header, message = response.split(':', 1)
+                               username = header.split()[1]  # Get username from "P2P_MESSAGE_FROM username"
+                               # This is a small hack to print the message
+                               # without mangling the user's current input line.
+                               sys.stdout.write(f"\n[Message from {username}]: {message}\n")
+                               sys.stdout.write("> ")  # Re-print the prompt
+                               sys.stdout.flush()  # Ensure it appears
+                           except Exception as e:
+                               cl.error(f"Error parsing P2P message: {e}")
+                       elif response.startswith("LIST_USERS_SUCCESS"):
+                           # Handle the response from the 'ls' command
+                           try:
+                               users = response.split(maxsplit=1)[1]
+                               sys.stdout.write(f"\n[Connected Users]: {users}\n")
+                               sys.stdout.write("> ")  # Re-print the prompt
+                               sys.stdout.flush()
+                           except Exception as e:
+                               cl.error(f"Error parsing user list: {e}")
+                       # You could add other server "push" messages here
+                       # elif response.startswith("GLOBAL_ANNOUNCEMENT"):
+                       #    ...
+           except Exception as e:
+               if not stop_event.is_set():  # Don't log errors if we're just shutting down
+                   cl.error(f"Error in listener thread: {e}")
+       cl.log("Server listener thread shutting down.")
 
 
 def handle_login_response(response, cl):
@@ -186,7 +231,8 @@ def client_heartbeat(client, cl):
     """
     try:
         client.send_data(f"HEARTBEAT NONE NONE")
-        cl.info("Sent ALIVE ping to server.")
+        if not client.suppress_output:
+            cl.info("Sent ALIVE ping to server.")
     except Exception as e:
         cl.error(f"Error sending ALIVE ping: {e}")
 
@@ -200,7 +246,7 @@ def run_game_loop_cli(client, cl):
     # Use an event to signal the heartbeat thread to stop
     stop_event = threading.Event()
 
-    def heartbeat_task():
+    def heartbeat_task(client, cl, stop_event):  # <-- Modified to accept stop_event
         """This function will run in a separate thread."""
         while not stop_event.is_set():
             client_heartbeat(client, cl)
@@ -212,44 +258,106 @@ def run_game_loop_cli(client, cl):
                 time.sleep(1)
 
     # Start the heartbeat thread
-    heartbeat_thread = threading.Thread(target=heartbeat_task, daemon=True)
+    # Pass stop_event as an argument
+    heartbeat_thread = threading.Thread(target=heartbeat_task, daemon=True, args=(client, cl, stop_event))
     heartbeat_thread.start()
+
+    # --- Start the new Server Listener Thread ---
+    listener_thread = threading.Thread(target=server_listener_task, daemon=True, args=(client, cl, stop_event))
+    listener_thread.start()
 
     cl.log("Game loop started. Type 'stats' to see your stats or 'quit' to exit.")
 
     try:
         while True:
+            # This input() BLOCKS the main thread
             command = input("> ").strip().lower()
+
+            target_usr = ""
 
             if command == 'quit':
                 cl.log("Quitting...")
-                break
+                break  # Exit the while loop
 
             elif command == 'stats':
-                # Access the stats stored in the client's player object
+                # ... (no change here)
                 try:
                     stats_str = (
                         f"Current Stats - "
-                        f"Sword: {client.player.sword_damage}, "
-                        f"Shield: {client.player.shield_defense}, "
-                        f"Slaying: {client.player.slaying_strength}, "
-                        f"Healing: {client.player.healing_strength}"
+                        f"Sword: {client.player.inventory.sword.damage}, "
+                        f"Shield: {client.player.inventory.shield.defense}, "
+                        f"Slaying: {client.player.inventory.slaying_potion.strength}, "
+                        f"Healing: {client.player.inventory.healing_potion.strength}"
                     )
                     cl.info(stats_str)
-                except AttributeError:
-                    cl.error("Player stats not initialized yet.")
+                except AttributeError as e:
+                    cl.error(f"Error retrieving stats: {e}")
+
+            elif command.startswith(f'msg:'):
+                # ... (no change here)
+                try:
+                    message = command.split(':', 2)
+                    target_usr = message[1]
+                    user_msg = message[2]
+                    client.send_data(f"P2P_MESSAGE {target_usr} {user_msg}")
+                    cl.log(f"Sent message to {target_usr}.")
+                except IndexError:
+                    cl.error("Invalid message format. Use: msg:username:your_message")
+
+            elif command.startswith('ls'):
+                # --- THIS IS THE KEY CHANGE ---
+                # We no longer wait for a response here.
+                # We just send the request. The listener thread will get the answer.
+                try:
+                    client.send_data(f"LIST_USERS NONE NONE")
+                    cl.log("Requesting user list... (response will appear)")
+                except Exception as e:
+                    cl.error(f"Error sending 'ls' request: {e}")
+
+            elif command.startswith('enable_heartbeat'):
+                # ... (no change here)
+                client.suppress_output = False
+                cl.log("Heartbeat output enabled.")
+            elif command.startswith('disable_heartbeat'):
+                # ... (no change here)
+                client.suppress_output = True
+                cl.log("Heartbeat output disabled.")
+
+            elif command.startswith('clr'):
+                # ... (no change here)
+                if sys.platform.startswith('win'):
+                    _ = os.system('cls')
+                else:
+                    _ = os.system('clear')
+                cl.log("Console cleared.")
+
+            elif command.startswith('help'):
+                # ... (no change here)
+                print("\n--- Available Commands ---")
+                print("stats                 - Show current player stats")
+                print("msg:username:message  - Send a message to another user")
+                print("ls                    - List connected users")
+                print("enable_heartbeat      - Enable heartbeat output")
+                print("disable_heartbeat     - Disable heartbeat output")
+                print("clr                   - Clear the console")
+                print("help                  - Show this help message")
+                print("quit                  - Exit the game\n")
 
             else:
-                cl.warning(f"Unknown command: '{command}'. Try 'stats' or 'quit'.")
+                cl.warning(f"Unknown command: '{command}'. Type help for a list of commands.")
 
     except KeyboardInterrupt:
         cl.log("\nCaught Ctrl+C. Shutting down game loop.")
 
     finally:
-        # Signal the heartbeat thread to stop
-        cl.log("Stopping heartbeat timer...")
+        # Signal BOTH threads to stop
+        cl.log("Stopping threads...")
         stop_event.set()
-        heartbeat_thread.join(timeout=2)  # Wait for thread to finish
+
+        # Wait for both threads to finish (this is the "join")
+        heartbeat_thread.join(timeout=2)
+        listener_thread.join(timeout=2)  # <-- JOIN THE NEW THREAD
+
         cl.log("Game loop ended.")
 
 

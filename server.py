@@ -104,6 +104,19 @@ class Server:
             self.sl.warning(f"Client {address} has timed out and will be removed.")
             del self.active_players[address]
 
+    def p2p_message(self, from_address, to_address, message):
+        """
+        Sends a P2P message from one client to another.
+        """
+        if to_address in self.active_players:
+            try:
+                self.send_data(f"P2P_MESSAGE from {from_address}: {message}", to_address)
+                self.sl.info(f"Relayed P2P message from {from_address} to {to_address}")
+            except Exception as e:
+                self.sl.error(f"Error relaying P2P message: {e}")
+        else:
+            self.sl.warning(f"Attempted to send P2P message to inactive client {to_address}")
+
 
 # --- End of Server class ---
 
@@ -114,13 +127,13 @@ def handle_client_request(pServer, data, client_address, sl):
     Parses and responds to a single client request.
     """
 
+    # Print Request Info
+    sl.info(f"Received data from {client_address}: {data}")
+
     if client_address in pServer.active_players:
         pServer.active_players[client_address]['last_ping'] = time.time()
 
     parts = data.split()
-    if len(parts) < 3:
-        sl.warning(f"Received malformed data from {client_address}: {data}")
-        return  # Ignore malformed commands
 
     command = parts[0]
     username = parts[1]
@@ -234,11 +247,56 @@ def handle_client_request(pServer, data, client_address, sl):
         else:
             pServer.send_data("GET_STATS_FAIL Invalid credentials", client_address)
 
-    elif command.startswith("HEARTBEAT"):
-        pass
+    elif command == "P2P_MESSAGE":
+        # Data format: P2P_MESSAGE target_username message_text...
+        # Note: 'password' variable here is actually the start of the message
+        # Let's re-parse the data
 
-    else:
-        sl.warning(f"Received unknown command from {client_address}: {command}")
+        parts = data.split(maxsplit=2)
+        if len(parts) < 3:
+            sl.warning(f"Malformed P2P_MESSAGE from {client_address}")
+            return
+
+        target_username = parts[1]
+        message_text = parts[2]
+
+        # Find the sender's username
+        sender_username = None
+        if client_address in pServer.active_players:
+            sender_username = pServer.active_players[client_address]["player"].profile.username
+
+        if not sender_username:
+            sl.warning(f"P2P message from non-active user at {client_address}")
+            pServer.send_data("P2P_FAIL Not logged in", client_address)
+            return
+
+        # Find the target player's address
+        target_address = None
+        for addr, p_data in pServer.active_players.items():
+            if p_data["player"].profile.username == target_username:
+                target_address = addr
+                break
+
+        if target_address:
+            # Found them. Send the message.
+            pServer.send_data(f"P2P_MESSAGE_FROM {sender_username}:{message_text}", target_address)
+            sl.info(f"Relayed message from {sender_username} to {target_username}")
+        else:
+            # Target user not found or not active
+            sl.warning(f"User {sender_username} tried to message non-existent user {target_username}")
+            pServer.send_data(f"P2P_FAIL User '{target_username}' not online", client_address)
+
+    elif command == "LIST_USERS":
+        active_user_list = [
+            p_data["player"].profile.username
+            for p_data in pServer.active_players.values()
+        ]
+        user_string = ", ".join(active_user_list)
+        pServer.send_data(f"LIST_USERS_SUCCESS {user_string}", client_address)
+        sl.info(f"Sent user list to {client_address}")
+
+    elif command.startswith("HEARTBEAT"):
+        pass  # Already handled by the ping update at the top
 
 
 # Now takes 'sl' as a parameter
