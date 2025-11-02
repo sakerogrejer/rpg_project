@@ -4,11 +4,9 @@ from logger import ServerLogger
 
 
 class Server:
-    # --- Server class ---
+    # --- Server class (no changes) ---
     def __init__(self, host='localhost', port=9999):
-        # The Server class now creates and owns the logger instance
         self.sl = ServerLogger()
-
         self.server_address = (host, port)
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.settimeout(1.0)  # 1 second timeout for recvfrom
@@ -16,7 +14,7 @@ class Server:
         self.players = {}  # This is the persistent DB
         self.active_players = {}  # This stores in-memory player objects
         self.server_db_path = "server_db.json"
-        self.sl.info(f"Server started at {host}:{port}")  # Use self.sl
+        self.sl.info(f"Server started at {host}:{port}")
 
     def receive_data(self):
         try:
@@ -25,7 +23,7 @@ class Server:
         except socket.timeout:
             return "TIMEOUT", None
         except Exception as e:
-            self.sl.error(f"Error receiving data: {e}")  # Use self.sl
+            self.sl.error(f"Error receiving data: {e}")
             return None, None
 
     def send_data(self, data, client_address):
@@ -33,18 +31,18 @@ class Server:
             message = data.encode()
             self.sock.sendto(message, client_address)
         except Exception as e:
-            self.sl.error(f"Error sending data: {e}")  # Use self.sl
+            self.sl.error(f"Error sending data: {e}")
 
     def load_db(self):
         try:
             if os.path.exists(self.server_db_path):
                 with open(self.server_db_path, 'r') as f:
                     self.players = json.load(f)
-                self.sl.info("Server database loaded.")  # Use self.sl
+                self.sl.info("Server database loaded.")
             else:
-                self.sl.warning("No existing server database found. Starting fresh.")  # Use self.sl
+                self.sl.warning("No existing server database found. Starting fresh.")
         except Exception as e:
-            self.sl.error(f"Error loading server database: {e}")  # Use self.sl
+            self.sl.error(f"Error loading server database: {e}")
             self.players = {}
 
     def add_player_to_db(self, player_id, Player):
@@ -54,10 +52,9 @@ class Server:
             "logins": 0
         }
         with open(self.server_db_path, 'w') as f:
-            json.dump(self.players, f, indent=4)  # Added indent for readability
+            json.dump(self.players, f, indent=4)
 
     def set_player_stats_in_db(self, player_id, stats):
-        # stat_type = ["sword_level", "shield_level", "slaying_potion_level", "healing_potion_level"]
         if player_id in self.players:
             self.players[player_id]["stats"] = stats
             with open(self.server_db_path, 'w') as f:
@@ -101,194 +98,165 @@ class Server:
                 inactive_clients.append(address)
 
         for address in inactive_clients:
-            self.sl.warning(f"Client {address} has timed out and will be removed.")
+            username = self.active_players[address].get("player", None)
+            if username:
+                username = username.profile.username
+            else:
+                username = "Unknown"
+            self.sl.warning(f"Client {username} at {address} has timed out and will be removed.")
             del self.active_players[address]
-
-    def p2p_message(self, from_address, to_address, message):
-        """
-        Sends a P2P message from one client to another.
-        """
-        if to_address in self.active_players:
-            try:
-                self.send_data(f"P2P_MESSAGE from {from_address}: {message}", to_address)
-                self.sl.info(f"Relayed P2P message from {from_address} to {to_address}")
-            except Exception as e:
-                self.sl.error(f"Error relaying P2P message: {e}")
-        else:
-            self.sl.warning(f"Attempted to send P2P message to inactive client {to_address}")
 
 
 # --- End of Server class ---
 
 
-# Now takes 'sl' as a parameter
+# --- REFACTORED to use session-based authentication ---
 def handle_client_request(pServer, data, client_address, sl):
     """
     Parses and responds to a single client request.
     """
-
-    # Print Request Info
     sl.info(f"Received data from {client_address}: {data}")
-
-    if client_address in pServer.active_players:
-        pServer.active_players[client_address]['last_ping'] = time.time()
-
     parts = data.split()
-
     command = parts[0]
-    username = parts[1]
-    password = parts[2]
 
-    # --- Handle LOGIN Command ---
+    # --- Handle non-authenticated commands first ---
     if command == "LOGIN":
-        player_id = pServer.check_db(username, password)
-        if player_id:
-            # User exists and password is correct
-            sl.info(f"Player {username} (ID: {player_id}) logged in from {client_address}")
+        try:
+            username = parts[1]
+            password = parts[2]
+            player_id = pServer.check_db(username, password)
+            if player_id:
+                sl.info(f"Player {username} (ID: {player_id}) logged in from {client_address}")
 
-            # Create a new player object for them in memory
-            new_player = player.Player()
-            new_player.create_profile(username, password)
+                new_player = player.Player()
+                new_player.create_profile(username, password)
 
-            # Load their inventory and stats if available
-            stats = pServer.get_player_stats_in_db(player_id)
-            if stats:
-                new_player.init_stats(
-                    int(stats["sword_damage"]),
-                    int(stats["shield_defense"]),
-                    int(stats["slaying_potion_strength"]),
-                    int(stats["healing_potion_strength"])
-                )
+                stats = pServer.get_player_stats_in_db(player_id)
+                if stats:
+                    new_player.init_stats(
+                        int(stats["sword_damage"]),
+                        int(stats["shield_defense"]),
+                        int(stats["slaying_potion_strength"]),
+                        int(stats["healing_potion_strength"])
+                    )
 
-            pServer.active_players[client_address] = {
-                "player": new_player,
-                "last_ping": time.time()
-            }
+                # --- THIS IS THE KEY: Store the session ---
+                pServer.active_players[client_address] = {
+                    "player": new_player,
+                    "last_ping": time.time(),
+                    "player_id": player_id  # Store the DB key
+                }
 
-            pServer.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
+                pServer.send_data(f"LOGIN_SUCCESS {player_id}", client_address)
 
-            # Increment their login count
-            pServer.players[player_id]["logins"] += 1
-            try:
-                with open(pServer.server_db_path, 'w') as f:
-                    json.dump(pServer.players, f, indent=4)  # Save updated DB
-            except Exception as e:
-                sl.error(f"Error updating server database: {e}")
+                pServer.players[player_id]["logins"] += 1
+                try:
+                    with open(pServer.server_db_path, 'w') as f:
+                        json.dump(pServer.players, f, indent=4)
+                except Exception as e:
+                    sl.error(f"Error updating server database: {e}")
 
-        else:
-            # User not found or wrong password
-            sl.info(f"Failed login attempt for {username} from {client_address}")
-            pServer.send_data("LOGIN_FAIL Invalid credentials", client_address)
+            else:
+                sl.info(f"Failed login attempt for {username} from {client_address}")
+                pServer.send_data("LOGIN_FAIL Invalid credentials", client_address)
+        except IndexError:
+            sl.warning(f"Malformed LOGIN from {client_address}")
+        return  # --- End of LOGIN ---
 
-    # --- Handle SIGNUP Command ---
     elif command == "SIGNUP":
-        if pServer.check_username_exists(username):
-            # Check if username is already taken
-            sl.info(f"Failed signup, username {username} already exists.")
-            pServer.send_data("SIGNUP_FAIL Username taken", client_address)
-        else:
-            # Create new player
-            new_player = player.Player()
-            new_player.create_profile(username, password)
+        try:
+            username = parts[1]
+            password = parts[2]
+            if pServer.check_username_exists(username):
+                sl.info(f"Failed signup, username {username} already exists.")
+                pServer.send_data("SIGNUP_FAIL Username taken", client_address)
+            else:
+                new_player = player.Player()
+                new_player.create_profile(username, password)
+                new_player_id = str(len(pServer.players) + 1)
+                pServer.add_player_to_db(new_player_id, new_player)
+                sl.info(f"New player {username} signed up with ID {new_player_id}")
+                pServer.send_data(f"SIGNUP_SUCCESS {new_player_id}", client_address)
+        except IndexError:
+            sl.warning(f"Malformed SIGNUP from {client_address}")
+        return  # --- End of SIGNUP ---
 
-            # Create a new ID for them (simple increment)
-            new_player_id = str(len(pServer.players) + 1)
+    # --- All commands below this point REQUIRE authentication ---
 
-            # Add them to the persistent database
-            pServer.add_player_to_db(new_player_id, new_player)
+    if client_address not in pServer.active_players:
+        sl.warning(f"Unauthenticated request from {client_address}: {data}")
+        pServer.send_data("ERROR Not logged in", client_address)
+        return
 
+    # If we get here, user is logged in. Get their session data.
+    active_data = pServer.active_players[client_address]
+    player_obj = active_data["player"]
+    player_id = active_data["player_id"]
+    username = player_obj.profile.username
 
-            sl.info(f"New player {username} signed up with ID {new_player_id}")
-            pServer.send_data(f"SIGNUP_SUCCESS {new_player_id}", client_address)
+    # Update their ping time
+    active_data['last_ping'] = time.time()
 
-    elif command == "LOGINS":
-        player_id = pServer.check_db(username, password)
-        if player_id:
-            sl.info(f"Received login count request from {username} (ID: {player_id})")
-            num_logins = pServer.get_num_of_logins(player_id)
-            pServer.send_data(f"LOGINS_COUNT {num_logins}", client_address)
-        else:
-            pServer.send_data("LOGINS_FAIL Invalid credentials", client_address)
+    # --- Handle Authenticated Commands ---
+    if command == "LOGINS":
+        sl.info(f"Received login count request from {username} (ID: {player_id})")
+        num_logins = pServer.get_num_of_logins(player_id)
+        pServer.send_data(f"LOGINS_COUNT {num_logins}", client_address)
 
     elif command.startswith("SET_STATS"):
-        player_id = pServer.check_db(username, password)
-        if player_id:
-            # Split SET_STATS:value1,value2,...
-            stats_data = command[len("SET_STATS:"):].strip()
-            stats = stats_data.split(",")
-            sword_damage = stats[0]
-            shield_defense = stats[1]
-            slaying_potion_strength = stats[2]
-            healing_potion_strength = stats[3]
+        stats_data = command[len("SET_STATS:"):].strip()
+        stats = stats_data.split(",")
+        sword_damage = stats[0]
+        shield_defense = stats[1]
+        slaying_potion_strength = stats[2]
+        healing_potion_strength = stats[3]
 
-            stats_dict = {
-                "sword_damage": sword_damage,
-                "shield_defense": shield_defense,
-                "slaying_potion_strength": slaying_potion_strength,
-                "healing_potion_strength": healing_potion_strength,
-                "health" : 2
-            }
+        stats_dict = {
+            "sword_damage": sword_damage,
+            "shield_defense": shield_defense,
+            "slaying_potion_strength": slaying_potion_strength,
+            "healing_potion_strength": healing_potion_strength,
+            "health": 2  # Default lives
+        }
 
-            pServer.set_player_stats_in_db(player_id, stats_dict)
-            sl.info(f"Updated stats for player {username} (ID: {player_id})")
-            pServer.send_data("SET_STATS_SUCCESS", client_address)
-
-        else:
-            pServer.send_data("SET_STATS_FAIL Invalid credentials", client_address)
+        pServer.set_player_stats_in_db(player_id, stats_dict)
+        sl.info(f"Updated stats for player {username} (ID: {player_id})")
+        pServer.send_data("SET_STATS_SUCCESS", client_address)
 
     elif command.startswith("GET_STATS"):
-        player_id = pServer.check_db(username, password)
-        if player_id:
-            stats = pServer.get_player_stats_in_db(player_id)
-            if stats:
-                stats_str = f"{stats['sword_damage']},{stats['shield_defense']}," + \
-                            f"{stats['slaying_potion_strength']},{stats['healing_potion_strength']}, {stats['health']}"
-
-                pServer.send_data(f"GET_STATS_SUCCESS {stats_str}", client_address)
-                sl.info(f"Sent stats to player {username} (ID: {player_id})")
-            else:
-                pServer.send_data("GET_STATS_FAIL No stats found", client_address)
+        stats = pServer.get_player_stats_in_db(player_id)
+        if stats:
+            stats_str = f"{stats['sword_damage']},{stats['shield_defense']}," + \
+                        f"{stats['slaying_potion_strength']},{stats['healing_potion_strength']},{stats['health']}"
+            pServer.send_data(f"GET_STATS_SUCCESS {stats_str}", client_address)
+            sl.info(f"Sent stats to player {username} (ID: {player_id})")
         else:
-            pServer.send_data("GET_STATS_FAIL Invalid credentials", client_address)
+            pServer.send_data("GET_STATS_FAIL No stats found", client_address)
 
     elif command == "P2P_MESSAGE":
         # Data format: P2P_MESSAGE target_username message_text...
-        # Note: 'password' variable here is actually the start of the message
-        # Let's re-parse the data
+        try:
+            parts = data.split(maxsplit=2)
+            target_username = parts[1]
+            message_text = parts[2]
 
-        parts = data.split(maxsplit=2)
-        if len(parts) < 3:
+            sender_username = username  # From our session data
+
+            target_address = None
+            for addr, p_data in pServer.active_players.items():
+                if p_data["player"].profile.username == target_username:
+                    target_address = addr
+                    break
+
+            if target_address:
+                pServer.send_data(f"P2P_MESSAGE_FROM {sender_username}:{message_text}", target_address)
+                sl.info(f"Relayed message from {sender_username} to {target_username}")
+            else:
+                sl.warning(f"User {sender_username} tried to message non-existent user {target_username}")
+                pServer.send_data(f"P2P_FAIL User '{target_username}' not online", client_address)
+        except IndexError:
             sl.warning(f"Malformed P2P_MESSAGE from {client_address}")
-            return
-
-        target_username = parts[1]
-        message_text = parts[2]
-
-        # Find the sender's username
-        sender_username = None
-        if client_address in pServer.active_players:
-            sender_username = pServer.active_players[client_address]["player"].profile.username
-
-        if not sender_username:
-            sl.warning(f"P2P message from non-active user at {client_address}")
-            pServer.send_data("P2P_FAIL Not logged in", client_address)
-            return
-
-        # Find the target player's address
-        target_address = None
-        for addr, p_data in pServer.active_players.items():
-            if p_data["player"].profile.username == target_username:
-                target_address = addr
-                break
-
-        if target_address:
-            # Found them. Send the message.
-            pServer.send_data(f"P2P_MESSAGE_FROM {sender_username}:{message_text}", target_address)
-            sl.info(f"Relayed message from {sender_username} to {target_username}")
-        else:
-            # Target user not found or not active
-            sl.warning(f"User {sender_username} tried to message non-existent user {target_username}")
-            pServer.send_data(f"P2P_FAIL User '{target_username}' not online", client_address)
+            pServer.send_data(f"P2P_FAIL Invalid format. Use: msg:user:msg", client_address)
 
     elif command == "LIST_USERS":
         active_user_list = [
@@ -302,62 +270,127 @@ def handle_client_request(pServer, data, client_address, sl):
     elif command.startswith("HEARTBEAT"):
         pass  # Already handled by the ping update at the top
 
+    # --- REBUILT BATTLE LOGIC ---
     elif command.startswith("ATTACK"):
-        # FIGHT_REQUEST {target_usr} NONE
-        parts = data.split()
-        if len(parts) < 3:
-            sl.warning(f"Malformed ATTACK from {client_address}")
+        # Format: ATTACK target_username
+
+        # --- 1. Identify Attacker & Target ---
+        attacker_address = client_address
+        attacker_id = player_id
+        attacker_username = username
+
+        try:
+            target_username = parts[1]
+        except IndexError:
+            sl.warning(f"Malformed ATTACK from {attacker_address}")
+            pServer.send_data("ATTACK_FAIL Invalid command. Use: attack:username", attacker_address)
             return
-        target_username = parts[1]
-        # Find the target player's address
+
+        if target_username == attacker_username:
+            pServer.send_data("ATTACK_FAIL You cannot attack yourself.", attacker_address)
+            return
+
+        # Find target's address and Player ID
         target_address = None
+        target_id = None
         for addr, p_data in pServer.active_players.items():
             if p_data["player"].profile.username == target_username:
                 target_address = addr
+                target_id = p_data["player_id"]
                 break
 
-        """
-              Instigator attacks target, victim will use their shield to block (Process outcome)
-              victim responds with attack, then instigator blocks with shield (Process outcome)
-              Continue until one player's health <= 0
-              Declare winner, update both players' lives accordingly
-              Notify both players of the outcome
-        """
-        a_stats = pServer.get_player_stats_in_db(target_username)
-        if a_stats is None:
-            sl.warning(f"ATTACK failed: target user {target_username} not found.")
-            pServer.send_data(f"ATTACK_FAIL User '{target_username}' not found", client_address)
+        if not target_address or not target_id:
+            pServer.send_data(f"ATTACK_FAIL User '{target_username}' not online", attacker_address)
             return
 
-        b_stats = pServer.get_player_stats_in_db(target_username)
-        if b_stats is None:
-            sl.warning(f"ATTACK failed: target user {target_username} not found.")
-            pServer.send_data(f"ATTACK_FAIL User '{target_username}' not found", client_address)
+        # --- 2. Load Stats for Both Players ---
+        a_stats_db = pServer.get_player_stats_in_db(attacker_id)
+        t_stats_db = pServer.get_player_stats_in_db(target_id)
+
+        if not a_stats_db or not t_stats_db:
+            pServer.send_data("ATTACK_FAIL Could not load stats for battle", attacker_address)
             return
 
-        # Process the attack
-        total_damage = a_stats["sword_damage"] - b_stats["sword_defense"]
-        if total_damage < 0:
-            total_damage = 0
-        sl.info(f"Processed ATTACK from {username} to {target_username}, damage: {total_damage}")
+        # Load stats into "in-battle" variables
+        a_sword = int(a_stats_db["sword_damage"])
+        a_shield = int(a_stats_db["shield_defense"])
+        a_lives = int(a_stats_db["health"])
 
-        target_address = None
-        for addr, p_data in pServer.active_players.items():
-            if p_data["player"].profile.username == target_username:
-                target_address = addr
-                break
+        t_sword = int(t_stats_db["sword_damage"])
+        t_shield = int(t_stats_db["shield_defense"])
+        t_lives = int(t_stats_db["health"])
 
-        client_username = None
-        for addr, p_data in pServer.active_players.items():
-            if addr == client_address:
-                client_username = p_data["player"].profile.username
-                break
+        if a_lives <= 0:
+            pServer.send_data(f"ATTACK_FAIL You cannot fight, you have no lives left!", attacker_address)
+            return
+        if t_lives <= 0:
+            pServer.send_data(f"ATTACK_FAIL {target_username} has no lives left to fight.", attacker_address)
+            return
 
-        pServer.send_data(f"PROCESS_DAMAGE {total_damage} {client_username}", target_address)
+        sl.info(f"Battle started: {attacker_username} (Lives: {a_lives}) vs {target_username} (Lives: {t_lives})")
+
+        # --- 3. Run the Battle Loop ---
+        battle_log = []
+        turn = "attacker"
+
+        # Run for a max of 20 rounds to prevent weird infinite loops
+        for _ in range(20):
+            if a_lives <= 0 or t_lives <= 0:
+                break  # Battle is over
+
+            if turn == "attacker":
+                damage = a_sword - t_shield
+                if damage < 0: damage = 0
+                t_lives -= damage
+                battle_log.append(
+                    f"{attacker_username} hits {target_username} for {damage} damage! ({t_lives} lives left)")
+                turn = "target"
+            else:
+                damage = t_sword - a_shield
+                if damage < 0: damage = 0
+                a_lives -= damage
+                battle_log.append(
+                    f"{target_username} hits {attacker_username} for {damage} damage! ({a_lives} lives left)")
+                turn = "attacker"
+
+        # --- 4. Determine Winner and Send Results ---
+        log_string = " | ".join(battle_log)
+
+        if a_lives <= 0:
+            # Attacker lost
+            sl.info(f"Battle over: {target_username} defeated {attacker_username}")
+            pServer.send_data(f"BATTLE_RESULT LOSE:You were defeated by {target_username}. Log: {log_string}",
+                              attacker_address)
+            pServer.send_data(f"BATTLE_RESULT WIN:You defeated {attacker_username}! Log: {log_string}", target_address)
+
+            # Update DB
+            a_stats_db["health"] = a_lives
+            pServer.set_player_stats_in_db(attacker_id, a_stats_db)
+
+        elif t_lives <= 0:
+            # Target lost
+            sl.info(f"Battle over: {attacker_username} defeated {target_username}")
+            pServer.send_data(f"BATTLE_RESULT WIN:You defeated {target_username}! Log: {log_string}", attacker_address)
+            pServer.send_data(f"BATTLE_RESULT LOSE:You were defeated by {attacker_username}. Log: {log_string}",
+                              target_address)
+
+            # Update DB
+            t_stats_db["health"] = t_lives
+            pServer.set_player_stats_in_db(target_id, t_stats_db)
+
+        else:
+            # It was a draw (max rounds hit)
+            sl.info(f"Battle over: {attacker_username} and {target_username} drew.")
+            msg = f"BATTLE_RESULT DRAW:The battle ended in a draw! {log_string}"
+            pServer.send_data(msg, attacker_address)
+            pServer.send_data(msg, target_address)
+            # Optionally update health for both
+            a_stats_db["health"] = a_lives
+            t_stats_db["health"] = t_lives
+            pServer.set_player_stats_in_db(attacker_id, a_stats_db)
+            pServer.set_player_stats_in_db(target_id, t_stats_db)
 
 
-
-# Now takes 'sl' as a parameter
 def run_server_loop(pServer, maxPlayers, sl):
     """
     Main loop to listen for and handle client data.
@@ -367,14 +400,11 @@ def run_server_loop(pServer, maxPlayers, sl):
             data, client_address = pServer.receive_data()
 
             if data == "TIMEOUT":
-                # Check for timed-out clients
                 pServer.check_for_timeouts()
                 continue
 
             if data:
-                # Pass the logger instance down to the handler
                 handle_client_request(pServer, data, client_address, sl)
-
 
     except KeyboardInterrupt:
         sl.info("\nShutting down server (KeyboardInterrupt).")
@@ -384,11 +414,6 @@ def run_server_loop(pServer, maxPlayers, sl):
 
 
 if __name__ == "__main__":
-    # 1. Initialize the server object (this also creates server.sl)
     server = Server()
-
-    # 2. Load persistent data (uses server.sl internally)
     server.load_db()
-
-    # 3. Run the main loop, passing the server's logger instance
     run_server_loop(server, 8, server.sl)
