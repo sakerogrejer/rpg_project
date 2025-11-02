@@ -220,12 +220,15 @@ def handle_client_request(pServer, data, client_address, sl):
             shield_defense = stats[1]
             slaying_potion_strength = stats[2]
             healing_potion_strength = stats[3]
+
             stats_dict = {
                 "sword_damage": sword_damage,
                 "shield_defense": shield_defense,
                 "slaying_potion_strength": slaying_potion_strength,
-                "healing_potion_strength": healing_potion_strength
+                "healing_potion_strength": healing_potion_strength,
+                "health" : 2
             }
+
             pServer.set_player_stats_in_db(player_id, stats_dict)
             sl.info(f"Updated stats for player {username} (ID: {player_id})")
             pServer.send_data("SET_STATS_SUCCESS", client_address)
@@ -239,7 +242,8 @@ def handle_client_request(pServer, data, client_address, sl):
             stats = pServer.get_player_stats_in_db(player_id)
             if stats:
                 stats_str = f"{stats['sword_damage']},{stats['shield_defense']}," + \
-                            f"{stats['slaying_potion_strength']},{stats['healing_potion_strength']}"
+                            f"{stats['slaying_potion_strength']},{stats['healing_potion_strength']}, {stats['health']}"
+
                 pServer.send_data(f"GET_STATS_SUCCESS {stats_str}", client_address)
                 sl.info(f"Sent stats to player {username} (ID: {player_id})")
             else:
@@ -297,6 +301,60 @@ def handle_client_request(pServer, data, client_address, sl):
 
     elif command.startswith("HEARTBEAT"):
         pass  # Already handled by the ping update at the top
+
+    elif command.startswith("ATTACK"):
+        # FIGHT_REQUEST {target_usr} NONE
+        parts = data.split()
+        if len(parts) < 3:
+            sl.warning(f"Malformed ATTACK from {client_address}")
+            return
+        target_username = parts[1]
+        # Find the target player's address
+        target_address = None
+        for addr, p_data in pServer.active_players.items():
+            if p_data["player"].profile.username == target_username:
+                target_address = addr
+                break
+
+        """
+              Instigator attacks target, victim will use their shield to block (Process outcome)
+              victim responds with attack, then instigator blocks with shield (Process outcome)
+              Continue until one player's health <= 0
+              Declare winner, update both players' lives accordingly
+              Notify both players of the outcome
+        """
+        a_stats = pServer.get_player_stats_in_db(target_username)
+        if a_stats is None:
+            sl.warning(f"ATTACK failed: target user {target_username} not found.")
+            pServer.send_data(f"ATTACK_FAIL User '{target_username}' not found", client_address)
+            return
+
+        b_stats = pServer.get_player_stats_in_db(target_username)
+        if b_stats is None:
+            sl.warning(f"ATTACK failed: target user {target_username} not found.")
+            pServer.send_data(f"ATTACK_FAIL User '{target_username}' not found", client_address)
+            return
+
+        # Process the attack
+        total_damage = a_stats["sword_damage"] - b_stats["sword_defense"]
+        if total_damage < 0:
+            total_damage = 0
+        sl.info(f"Processed ATTACK from {username} to {target_username}, damage: {total_damage}")
+
+        target_address = None
+        for addr, p_data in pServer.active_players.items():
+            if p_data["player"].profile.username == target_username:
+                target_address = addr
+                break
+
+        client_username = None
+        for addr, p_data in pServer.active_players.items():
+            if addr == client_address:
+                client_username = p_data["player"].profile.username
+                break
+
+        pServer.send_data(f"PROCESS_DAMAGE {total_damage} {client_username}", target_address)
+
 
 
 # Now takes 'sl' as a parameter

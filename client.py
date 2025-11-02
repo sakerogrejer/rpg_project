@@ -39,8 +39,8 @@ class Client:
     def close(self):
         self.sock.close()
 
-#
-def server_listener_task(self, cl, stop_event):
+
+def server_listener_task(self, client, cl, stop_event):
        """
        This function runs in a separate thread.
        It waits for incoming messages from the server and prints them.
@@ -77,9 +77,29 @@ def server_listener_task(self, cl, stop_event):
                                sys.stdout.flush()
                            except Exception as e:
                                cl.error(f"Error parsing user list: {e}")
-                       # You could add other server "push" messages here
-                       # elif response.startswith("GLOBAL_ANNOUNCEMENT"):
-                       #    ...
+                       if response.startswith("PROCESS_DAMAGE"):
+                           # PROCESS_DAMAGE {total_damage} {client_username}
+                            try:
+                                parts = response.split()
+                                total_damage = parts[1] # total_damage
+                                attacker_username = parts[2] # attacker username
+                                client.player.lives -= int(total_damage)
+                                cl.info(f"You took {total_damage}")
+                                cl.info(f"Lives remaining: {client.player.lives}")
+                                if client.player.lives <= 0:
+                                    cl.warning("You have been defeated!")
+                                else:
+                                    cl.info("You survived the attack!")
+                                    cl.info("Preparing to attack...")
+                                    battle( client, attacker_username, cl)
+
+                            except Exception as e:
+                                cl.error(f"Error processing damage: {e}")
+
+
+
+
+
            except Exception as e:
                if not stop_event.is_set():  # Don't log errors if we're just shutting down
                    cl.error(f"Error in listener thread: {e}")
@@ -176,7 +196,7 @@ def run_login_cli(client, ret_info, cl):
             cl.warning("Invalid choice. Please enter 1, 2, or 3.")
 
 
-def get_stat_input(prompt, cl):
+def get_stat_input(prompt, stat_min, stat_max, cl):
     """Helper function to get a single valid integer stat from the user."""
     while True:
         try:
@@ -185,6 +205,12 @@ def get_stat_input(prompt, cl):
             if value_int < 0:
                 cl.warning("Stat value must be non-negative.")
                 continue
+            if value_int > stat_max:
+                cl.warning(f"Stat value cannot exceed {stat_max}.")
+                continue
+            if value_int < stat_min:
+                cl.warning(f"Stat value must be at least {stat_min}.")
+                continue
             return value_int
         except ValueError:
             cl.error("Invalid input. Please enter a number.")
@@ -192,6 +218,16 @@ def get_stat_input(prompt, cl):
             cl.warning("\nStat selection cancelled.")
             return None
 
+def battle(client, target_usr, cl):
+    """
+    Sends a fight request to another user.
+    (No changes from original)
+    """
+    try:
+        client.send_data(f"ATTACK {target_usr} NONE")
+        cl.log(f"Sent fight request to {target_usr}.")
+    except Exception as e:
+        cl.error(f"Error sending fight request: {e}")
 
 def run_stats_selector_cli(cl):
     """
@@ -199,20 +235,37 @@ def run_stats_selector_cli(cl):
     Returns (sword, shield, slaying, healing) or None if user quits.
     """
     cl.log("This appears to be your first login. Please set your stats.")
+    cl.log("Distribute a total of 10 points among the following stats:")
+    cl.log(" - Sword Damage - [0-3]")
+    cl.log(" - Shield Defense - [0-3]")
+    cl.log(" - Slaying Strength - [0-3]")
+    cl.log(" - Healing Strength - [0-3]")
+
     print("--- Stat Selection ---")
 
+    # Total points allowed
+    POINT_BANK = 10
+
     try:
-        sword_damage = get_stat_input("Enter Sword Damage: ", cl)
+        sword_damage = get_stat_input("Enter Sword Damage: ", 0, min(POINT_BANK, 3), cl)
         if sword_damage is None: return None
+        POINT_BANK -= sword_damage
 
-        shield_defense = get_stat_input("Enter Shield Defense: ", cl)
+        shield_defense = get_stat_input("Enter Shield Defense: ", 0, min(POINT_BANK, 3),cl)
         if shield_defense is None: return None
+        POINT_BANK -= shield_defense
 
-        slaying_strength = get_stat_input("Enter Slaying Strength: ", cl)
+        slaying_strength = get_stat_input("Enter Slaying Strength: ",0, min(POINT_BANK, 3), cl)
         if slaying_strength is None: return None
+        POINT_BANK -= slaying_strength
 
-        healing_strength = get_stat_input("Enter Healing Strength: ", cl)
+        healing_strength = get_stat_input("Enter Healing Strength: ", 0, min(POINT_BANK, 3), cl)
         if healing_strength is None: return None
+        POINT_BANK -= healing_strength
+
+        if POINT_BANK != 0:
+            cl.warning(f"You have {POINT_BANK} unallocated points. Please allocate exactly 10 points.")
+            return run_stats_selector_cli(cl)
 
         cl.info(
             f"Stats selected: Sword {sword_damage}, Shield {shield_defense}, "
@@ -235,6 +288,7 @@ def client_heartbeat(client, cl):
             cl.info("Sent ALIVE ping to server.")
     except Exception as e:
         cl.error(f"Error sending ALIVE ping: {e}")
+
 
 
 def run_game_loop_cli(client, cl):
@@ -263,7 +317,7 @@ def run_game_loop_cli(client, cl):
     heartbeat_thread.start()
 
     # --- Start the new Server Listener Thread ---
-    listener_thread = threading.Thread(target=server_listener_task, daemon=True, args=(client, cl, stop_event))
+    listener_thread = threading.Thread(target=server_listener_task, daemon=True, args=(client, client, cl, stop_event))
     listener_thread.start()
 
     cl.log("Game loop started. Type 'stats' to see your stats or 'quit' to exit.")
@@ -288,6 +342,7 @@ def run_game_loop_cli(client, cl):
                         f"Shield: {client.player.inventory.shield.defense}, "
                         f"Slaying: {client.player.inventory.slaying_potion.strength}, "
                         f"Healing: {client.player.inventory.healing_potion.strength}"
+                        f" Lives: {client.player.lives}"
                     )
                     cl.info(stats_str)
                 except AttributeError as e:
@@ -331,12 +386,21 @@ def run_game_loop_cli(client, cl):
                     _ = os.system('clear')
                 cl.log("Console cleared.")
 
+            elif command.startswith('attack:'):
+                try:
+                    parts = command.split(':', 1)
+                    target_usr = parts[1]
+                    battle(client, target_usr, cl)
+                except IndexError:
+                    cl.error("Invalid attack format. Use: attack:username")
+
             elif command.startswith('help'):
                 # ... (no change here)
                 print("\n--- Available Commands ---")
                 print("stats                 - Show current player stats")
                 print("msg:username:message  - Send a message to another user")
                 print("ls                    - List connected users")
+                print("attack:username      - Attack another user")
                 print("enable_heartbeat      - Enable heartbeat output")
                 print("disable_heartbeat     - Disable heartbeat output")
                 print("clr                   - Clear the console")
@@ -433,8 +497,9 @@ def main():
             if stats_response and stats_response.startswith("GET_STATS_SUCCESS"):
                 try:
                     stats_data = stats_response.split(maxsplit=1)[1]
-                    sword_damage, shield_defense, slaying_strength, healing_strength = map(int, stats_data.split(','))
+                    sword_damage, shield_defense, slaying_strength, healing_strength, lives = map(int, stats_data.split(','))
                     client.player.init_stats(sword_damage, shield_defense, slaying_strength, healing_strength)
+                    client.player.lives = lives
                     cl.log(f"Received player stats from server: {stats_data}")
                     break  # Success
                 except (IndexError, ValueError) as e:
